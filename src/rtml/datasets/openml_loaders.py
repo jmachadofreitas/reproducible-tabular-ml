@@ -16,7 +16,7 @@ from rtml.resampling.base import (
     ResamplingPlan,
     ResamplingSpec,
     ResamplingStrategy,
-    make_openml_resample_id,
+    create_openml_resample_id,
 )
 from rtml.tasks.base import MetricSpec, TaskSpec, TaskType
 
@@ -186,7 +186,7 @@ def _build_resampling_plan(
                 )
                 resamples.append(
                     Resample(
-                        id=make_openml_resample_id(repeat=repeat, fold=fold, sample=sample),
+                        id=create_openml_resample_id(repeat=repeat, fold=fold, sample=sample),
                         train_idx=train_idx,
                         valid_idx=None,
                         test_idx=test_idx,
