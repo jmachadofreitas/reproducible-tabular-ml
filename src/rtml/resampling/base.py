@@ -26,8 +26,8 @@ class ResamplingStrategy(str, Enum):
 class Resample:
     id: str
     train_idx: np.ndarray
-    valid_idx: np.ndarray | None
     test_idx: np.ndarray
+    valid_idx: np.ndarray | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:

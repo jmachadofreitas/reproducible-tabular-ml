@@ -188,7 +188,6 @@ def _build_resampling_plan(
                     Resample(
                         id=create_openml_resample_id(repeat=repeat, fold=fold, sample=sample),
                         train_idx=train_idx,
-                        valid_idx=None,
                         test_idx=test_idx,
                         metadata={"repeat": repeat, "fold": fold, "sample": sample},
                     )

@@ -3,11 +3,16 @@ import pytest
 
 from rtml.datasets import Dataset, FeatureInfo, FeatureKind, FeatureSchema
 from rtml.datasets.sklearn_loaders import (
+    build_sklearn_benchmark_case,
+    build_sklearn_benchmark_suite,
+    build_sklearn_resampling_spec,
     load_breast_cancer_dataset,
     load_diabetes_dataset,
     load_iris_dataset,
+    load_sklearn_classification_suite,
     load_sklearn_dataset,
 )
+from rtml.resampling import ResamplingStrategy
 from rtml.tasks import MetricSpec, TaskSpec, TaskType
 
 
@@ -198,3 +203,57 @@ def test_generic_sklearn_loader_rejects_missing_values_during_schema_inference()
 
     with pytest.raises(ValueError, match="without missing values"):
         load_sklearn_dataset(loader_with_missing_values, name="synthetic")  # type: ignore
+
+
+def test_sklearn_benchmark_case_builder_materializes_resampling_plan() -> None:
+    dataset, task = load_breast_cancer_dataset()
+    spec = build_sklearn_resampling_spec(
+        name="breast_cancer_stratified_cv",
+        strategy=ResamplingStrategy.STRATIFIED_KFOLD,
+        n_folds=3,
+        stratify="target",
+        shuffle=True,
+        seed=7,
+    )
+
+    benchmark_case = build_sklearn_benchmark_case(
+        name="breast_cancer_case",
+        dataset=dataset,
+        task=task,
+        resampling_spec=spec,
+    )
+
+    assert benchmark_case.dataset is dataset
+    assert benchmark_case.task is task
+    assert benchmark_case.resampling.spec.strategy == ResamplingStrategy.STRATIFIED_KFOLD
+    assert len(benchmark_case.resampling.resamples) == 3
+
+
+def test_sklearn_benchmark_suite_builder_collects_cases() -> None:
+    dataset, task = load_diabetes_dataset()
+    spec = build_sklearn_resampling_spec(
+        name="diabetes_kfold",
+        strategy=ResamplingStrategy.KFOLD,
+        n_folds=2,
+        shuffle=True,
+        seed=11,
+    )
+    benchmark_case = build_sklearn_benchmark_case(
+        name="diabetes_case",
+        dataset=dataset,
+        task=task,
+        resampling_spec=spec,
+    )
+
+    suite = build_sklearn_benchmark_suite(name="local_sklearn_suite", cases=[benchmark_case])
+
+    assert suite.name == "local_sklearn_suite"
+    assert suite.cases == [benchmark_case]
+
+
+def test_load_sklearn_classification_suite_builds_default_suite() -> None:
+    suite = load_sklearn_classification_suite()
+
+    assert suite.name == "sklearn classification"
+    assert [case.dataset.name for case in suite.cases] == ["breast_cancer", "iris", "wine"]
+    assert all(case.resampling.spec.strategy == ResamplingStrategy.STRATIFIED_KFOLD for case in suite.cases)
