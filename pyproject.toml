@@ -9,6 +9,8 @@ dependencies = [
     "scikit-learn",
     "openml",
     "hydra-core",
+    "hydra-ray-launcher",
+    "ray[default]",
     "mlflow",
 ]
 
