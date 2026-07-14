@@ -231,7 +231,7 @@ def get_openml_task_split_indices(
     return task.get_train_test_split_indices(repeat=repeat, fold=fold, sample=sample)
 
 
-def load_benchmark_case(
+def load_openml_benchmark_case(
     task_id: int,
     *,
     suite_id: int | None = None,
@@ -313,14 +313,16 @@ def load_benchmark_case(
 
 
 def load_openml_task(task_id: int) -> tuple[Dataset, TaskSpec]:
-    benchmark_case = load_benchmark_case(task_id)
+    benchmark_case = load_openml_benchmark_case(task_id)
     return benchmark_case.dataset, benchmark_case.task
 
 
 def load_openml_suite(suite_id: int = OPENML_CC18_SUITE_ID) -> BenchmarkSuite:
     suite = get_openml_suite(suite_id)
     task_ids = get_openml_suite_task_ids(suite_id)
-    benchmark_cases = [load_benchmark_case(task_id, suite_id=suite_id) for task_id in task_ids]
+    benchmark_cases = [
+        load_openml_benchmark_case(task_id, suite_id=suite_id) for task_id in task_ids
+    ]
     return BenchmarkSuite(
         name=getattr(suite, "name", f"openml_suite_{suite_id}"),
         cases=benchmark_cases,
@@ -339,5 +341,5 @@ def load_openml_cc18_task(task_id: int) -> tuple[Dataset, TaskSpec]:
         raise ValueError(
             f"task_id {task_id} is not part of the OpenML-CC18 suite {OPENML_CC18_SUITE_ID}"
         )
-    benchmark_case = load_benchmark_case(task_id, suite_id=OPENML_CC18_SUITE_ID)
+    benchmark_case = load_openml_benchmark_case(task_id, suite_id=OPENML_CC18_SUITE_ID)
     return benchmark_case.dataset, benchmark_case.task
