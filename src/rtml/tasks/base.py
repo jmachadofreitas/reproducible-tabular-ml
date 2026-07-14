@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from rtml.datasets.data import Dataset
+if TYPE_CHECKING:
+    from rtml.datasets.data import Dataset
 
 
 class TaskType(str, Enum):

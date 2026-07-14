@@ -23,12 +23,29 @@ class FeatureKind(str, Enum):
     UNKNOWN = "unknown"
 
 
+class FeatureTag(str, Enum):
+    MISSING_VALUES = "missing_values"
+    SKEWED = "skewed"
+    ZERO_INFLATED = "zero_inflated"
+    HIGH_CARDINALITY = "high_cardinality"
+    BOUNDED = "bounded"
+
+FeatureTagLike = FeatureTag | str
+
+
+def _normalize_tag(tag: FeatureTagLike) -> FeatureTagLike:
+    try:
+        return FeatureTag(tag)
+    except ValueError:
+        return str(tag)
+
+
 @dataclass
 class FeatureInfo:
     name: str
     kind: FeatureKind
     dtype: str | None = None
-    tags: set[str] = field(default_factory=set)
+    tags: set[FeatureTagLike] = field(default_factory=set)
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -36,7 +53,7 @@ class FeatureInfo:
             raise ValueError("feature name must be non-empty")
 
         self.kind = FeatureKind(self.kind)
-        self.tags = set(self.tags or ())
+        self.tags = {_normalize_tag(tag) for tag in self.tags or ()}
         self.metadata = dict(self.metadata or {})
 
 
@@ -79,15 +96,16 @@ class FeatureSchema:
         wanted = {FeatureKind(kind) for kind in kinds}
         return [name for name, info in self.features.items() if info.kind in wanted]
 
-    def tagged(self, tag: str) -> list[str]:
-        return [name for name, info in self.features.items() if tag in info.tags]
+    def tagged(self, tag: FeatureTagLike) -> list[str]:
+        wanted = _normalize_tag(tag)
+        return [name for name, info in self.features.items() if wanted in info.tags]
 
     def select(
         self,
         *,
         kinds: Iterable[FeatureKind | str] | None = None,
-        include_tags: Iterable[str] = (),
-        exclude_tags: Iterable[str] = (),
+        include_tags: Iterable[FeatureTagLike] = (),
+        exclude_tags: Iterable[FeatureTagLike] = (),
         require_all_tags: bool = True,
     ) -> list[str]:
         selected = list(self.features.items())
@@ -95,8 +113,8 @@ class FeatureSchema:
             wanted_kinds = {FeatureKind(kind) for kind in kinds}
             selected = [(name, info) for name, info in selected if info.kind in wanted_kinds]
 
-        include_tags_set = set(include_tags)
-        exclude_tags_set = set(exclude_tags)
+        include_tags_set = {_normalize_tag(tag) for tag in include_tags}
+        exclude_tags_set = {_normalize_tag(tag) for tag in exclude_tags}
 
         # This supports preprocessing policies such as "numeric + skewed" or
         # "categorical without high_cardinality".
@@ -245,8 +263,8 @@ class Dataset:
         self,
         *,
         kinds: Iterable[FeatureKind | str] | None = None,
-        include_tags: Iterable[str] = (),
-        exclude_tags: Iterable[str] = (),
+        include_tags: Iterable[FeatureTagLike] = (),
+        exclude_tags: Iterable[FeatureTagLike] = (),
         require_all_tags: bool = True,
         return_features: Literal[False] = False,
     ) -> list[str]: ...
@@ -256,8 +274,8 @@ class Dataset:
         self,
         *,
         kinds: Iterable[FeatureKind | str] | None = None,
-        include_tags: Iterable[str] = (),
-        exclude_tags: Iterable[str] = (),
+        include_tags: Iterable[FeatureTagLike] = (),
+        exclude_tags: Iterable[FeatureTagLike] = (),
         require_all_tags: bool = True,
         return_features: Literal[True],
     ) -> dict[str, FeatureInfo]: ...
@@ -266,8 +284,8 @@ class Dataset:
         self,
         *,
         kinds: Iterable[FeatureKind | str] | None = None,
-        include_tags: Iterable[str] = (),
-        exclude_tags: Iterable[str] = (),
+        include_tags: Iterable[FeatureTagLike] = (),
+        exclude_tags: Iterable[FeatureTagLike] = (),
         require_all_tags: bool = True,
         return_features: bool = False,
     ) -> list[str] | dict[str, FeatureInfo]:

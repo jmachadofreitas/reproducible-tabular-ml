@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from rtml.datasets.data import Dataset
-from rtml.resampling.base import ResamplingPlan
-from rtml.tasks.base import TaskSpec
+if TYPE_CHECKING:
+    from rtml.datasets.data import Dataset
+    from rtml.resampling.base import ResamplingPlan
+    from rtml.tasks.base import TaskSpec
 
 
 @dataclass
