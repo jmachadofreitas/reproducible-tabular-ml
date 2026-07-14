@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from rtml.datasets import Dataset, FeatureInfo, FeatureKind, FeatureSchema
+from rtml.datasets import Dataset, FeatureInfo, FeatureKind, FeatureSchema, FeatureTag
 from rtml.datasets.sklearn_loaders import (
     build_sklearn_benchmark_case,
     build_sklearn_benchmark_suite,
@@ -80,24 +80,31 @@ def test_schema_infer_and_dataset_validation() -> None:
 def test_feature_schema_select_supports_kind_and_tag_queries() -> None:
     dataset = make_tagged_dataset()
 
+    assert dataset.schema.get("x_num").tags == {
+        FeatureTag.SKEWED,
+        FeatureTag.MISSING_VALUES,
+    }
     assert dataset.schema.select(kinds=[FeatureKind.NUMERIC]) == ["x_num", "x_sparse"]
-    assert dataset.schema.select(kinds=["numeric"], include_tags=["skewed"]) == ["x_num"]
+    assert dataset.schema.select(kinds=["numeric"], include_tags=[FeatureTag.SKEWED]) == ["x_num"]
     assert dataset.schema.select(include_tags=["zero_inflated", "many_zeros"]) == ["x_sparse"]
     assert dataset.schema.select(
-        include_tags=["skewed", "zero_inflated"],
+        include_tags=[FeatureTag.SKEWED, FeatureTag.ZERO_INFLATED],
         require_all_tags=False,
     ) == ["x_num", "x_sparse"]
     assert dataset.schema.select(
         kinds=[FeatureKind.NUMERIC, FeatureKind.CATEGORICAL],
-        exclude_tags=["high_cardinality"],
+        exclude_tags=[FeatureTag.HIGH_CARDINALITY],
     ) == ["x_num", "x_sparse"]
+    assert dataset.schema.tagged(FeatureTag.ZERO_INFLATED) == ["x_sparse"]
 
 
 def test_dataset_select_returns_columns_or_feature_info() -> None:
     dataset = make_tagged_dataset()
 
-    assert dataset.select(kinds=[FeatureKind.NUMERIC], include_tags=["skewed"]) == ["x_num"]
-    selected = dataset.select(include_tags=["zero_inflated"], return_features=True)
+    assert dataset.select(kinds=[FeatureKind.NUMERIC], include_tags=[FeatureTag.SKEWED]) == [
+        "x_num"
+    ]
+    selected = dataset.select(include_tags=[FeatureTag.ZERO_INFLATED], return_features=True)
     assert list(selected) == ["x_sparse"]
     assert selected["x_sparse"].kind == FeatureKind.NUMERIC
 
@@ -256,4 +263,6 @@ def test_load_sklearn_classification_suite_builds_default_suite() -> None:
 
     assert suite.name == "sklearn classification"
     assert [case.dataset.name for case in suite.cases] == ["breast_cancer", "iris", "wine"]
-    assert all(case.resampling.spec.strategy == ResamplingStrategy.STRATIFIED_KFOLD for case in suite.cases)
+    assert all(
+        case.resampling.spec.strategy == ResamplingStrategy.STRATIFIED_KFOLD for case in suite.cases
+    )
