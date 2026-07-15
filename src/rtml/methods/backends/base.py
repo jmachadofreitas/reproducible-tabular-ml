@@ -26,10 +26,6 @@ class MethodBackend(Protocol):
 
     name: str
 
-    def can_run(self, method: MethodSpec) -> bool:
-        """Return whether this backend can execute the method specification."""
-        ...
-
     def run(
         self,
         *,

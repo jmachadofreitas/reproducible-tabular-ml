@@ -81,9 +81,6 @@ class SklearnBackend(MethodBackend):
 
     name = "sklearn"
 
-    def can_run(self, method: MethodSpec) -> bool:
-        return method.model.get("backend", self.name) == self.name
-
     def run(
         self,
         *,

@@ -1,3 +1,3 @@
-from rtml.methods.base import MethodSpec
+from rtml.methods.base import MethodSpec, ModelSpec
 
-__all__ = ["MethodSpec"]
+__all__ = ["MethodSpec", "ModelSpec"]
