@@ -41,7 +41,7 @@ def save_prediction_set(predictions: PredictionSet, path: str | Path) -> Path:
         for field in _ARRAY_FIELDS
         if (array := _optional_array(getattr(predictions, field))) is not None
     }
-    np.savez_compressed(artifact_path, metadata_json=json.dumps(payload), **arrays)
+    np.savez_compressed(artifact_path, metadata_json=json.dumps(payload), **arrays) # pyright: ignore[reportArgumentType]
     return artifact_path
 
 

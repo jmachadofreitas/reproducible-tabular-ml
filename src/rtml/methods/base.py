@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
-SUPPORTED_MODEL_BACKENDS: dict[str, set[str]] = {
+COMPATIBLE_MODEL_BACKENDS: dict[str, set[str]] = {
     "linear_regression": {"sklearn"},
     "logistic_regression": {"sklearn"},
     "ridge": {"sklearn"},
@@ -27,7 +27,7 @@ class ModelSpec:
         if not self.backend:
             raise ValueError("model backend must be non-empty")
         self.params = dict(self.params or {})
-        supported_backends = SUPPORTED_MODEL_BACKENDS.get(self.kind)
+        supported_backends = COMPATIBLE_MODEL_BACKENDS.get(self.kind)
         if supported_backends is None:
             raise ValueError(f"unsupported model kind {self.kind!r}")
         if self.backend not in supported_backends:
