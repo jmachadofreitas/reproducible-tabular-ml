@@ -12,6 +12,7 @@ from rtml.methods.models.sklearn import build_sklearn_estimator
 from rtml.preprocessing import build_preprocessor
 from rtml.resampling.base import Resample
 from rtml.results.base import PredictionSet
+from rtml.runtime import RuntimeSpec
 from rtml.tasks.base import TaskType
 from rtml.tasks.metrics import compute_metrics
 
@@ -88,6 +89,7 @@ class SklearnBackend(MethodBackend):
         method: MethodSpec,
         resample_id: str | None = None,
         seed: int = 0,
+        runtime: RuntimeSpec | None = None,
     ) -> BackendResult:
         case.task.validate_columns(case.dataset)
         resample = _find_resample(case, resample_id)
@@ -104,6 +106,7 @@ class SklearnBackend(MethodBackend):
             task_type=case.task.task_type,
             method=method,
             seed=seed,
+            runtime=runtime,
         )
         pipeline = Pipeline(steps=[("preprocessor", preprocessor), ("model", estimator)])
 

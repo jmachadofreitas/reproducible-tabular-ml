@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from rtml.methods.base import MethodSpec
 from rtml.results.base import PredictionSet
+from rtml.runtime import RuntimeSpec
 
 if TYPE_CHECKING:
     from rtml.benchmarks.base import BenchmarkCase
@@ -33,6 +34,7 @@ class MethodBackend(Protocol):
         method: MethodSpec,
         resample_id: str | None = None,
         seed: int = 0,
+        runtime: RuntimeSpec | None = None,
     ) -> BackendResult:
         """Execute one method on one benchmark case/resample."""
         ...
