@@ -1,49 +1,46 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import asdict
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from rtml.runs.base import RunRecord
 
-
-def _clean_param_value(value: Any) -> str | int | float | bool:
-    if value is None:
-        return ""
-    if isinstance(value, str | int | float | bool):
-        return value
-    return str(value)
+DEFAULT_MLFLOW_EXPERIMENT_NAME = "rtml"
+DEFAULT_MLFLOW_TRACKING_URI = "sqlite:///.runs/mlflow/mlflow.db"
+DEFAULT_MLFLOW_ARTIFACT_SUBDIR = "artifacts"
 
 
-def _flatten_mapping(prefix: str, values: Mapping[str, Any]) -> dict[str, str | int | float | bool]:
-    flattened: dict[str, str | int | float | bool] = {}
-    for key, value in values.items():
-        name = f"{prefix}.{key}" if prefix else str(key)
-        if isinstance(value, Mapping):
-            flattened.update(_flatten_mapping(name, value))
-        else:
-            flattened[name] = _clean_param_value(value)
-    return flattened
+def _ensure_sqlite_parent(tracking_uri: str) -> None:
+    if not tracking_uri.startswith("sqlite:///"):
+        return
+    db_path = tracking_uri.removeprefix("sqlite:///")
+    if db_path and db_path != ":memory:":
+        Path(db_path).expanduser().parent.mkdir(parents=True, exist_ok=True)
 
 
-@dataclass
 class MLflowLogger:
     """MLflow adapter for RTML run records and artifacts."""
 
-    experiment_name: str | None = None
-    tracking_uri: str | None = None
-    artifact_subdir: str = "artifacts"
-
-    def __post_init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        experiment_name: str | None = DEFAULT_MLFLOW_EXPERIMENT_NAME,
+        tracking_uri: str | None = DEFAULT_MLFLOW_TRACKING_URI,
+        artifact_subdir: str | None = DEFAULT_MLFLOW_ARTIFACT_SUBDIR,
+    ) -> None:
         import mlflow
 
         self._mlflow = mlflow
-        if self.tracking_uri is not None:
-            self._mlflow.set_tracking_uri(self.tracking_uri)
-        if self.experiment_name is not None:
-            self._mlflow.set_experiment(self.experiment_name)
+        self.experiment_name = experiment_name or DEFAULT_MLFLOW_EXPERIMENT_NAME
+        self.tracking_uri = tracking_uri or DEFAULT_MLFLOW_TRACKING_URI
+        self.artifact_subdir = artifact_subdir or DEFAULT_MLFLOW_ARTIFACT_SUBDIR
+        _ensure_sqlite_parent(self.tracking_uri)
+        self._mlflow.set_tracking_uri(self.tracking_uri)
+        experiment = self._mlflow.set_experiment(self.experiment_name)
+        self._experiment_id = experiment.experiment_id
 
     def log_running_metrics(
         self,
@@ -55,7 +52,7 @@ class MLflowLogger:
 
     def start_run(self, *, run_name: str | None = None):
         """Open an MLflow run for streaming metrics before final RTML logging."""
-        return self._mlflow.start_run(run_name=run_name)
+        return self._mlflow.start_run(run_name=run_name, experiment_id=self._experiment_id)
 
     def log_run(
         self,
@@ -71,7 +68,7 @@ class MLflowLogger:
             self._log_artifacts(record, artifact_paths)
             return active_run.info.run_id
 
-        with self._mlflow.start_run(run_name=run_name) as active_run:
+        with self.start_run(run_name=run_name) as active_run:
             self._log_run_info(record)
             self._log_metrics(record)
             self._log_artifacts(record, artifact_paths)
@@ -90,11 +87,11 @@ class MLflowLogger:
             "method_name": record.method.name,
             "seed": record.seed,
         }
-        params.update(_flatten_mapping("transform", record.method.transform))
-        params.update(_flatten_mapping("model", asdict(record.method.model)))
-        params.update(_flatten_mapping("training", record.method.training))
-        params.update(_flatten_mapping("runtime", asdict(record.runtime)))
-        params.update(_flatten_mapping("metadata", record.metadata))
+        params.update(self._flatten_mapping("transform", record.method.transform))
+        params.update(self._flatten_mapping("model", asdict(record.method.model)))
+        params.update(self._flatten_mapping("training", record.method.training))
+        params.update(self._flatten_mapping("runtime", asdict(record.runtime)))
+        params.update(self._flatten_mapping("metadata", record.metadata))
         self._mlflow.log_params(params)
 
         tags = {
@@ -131,3 +128,25 @@ class MLflowLogger:
                 self._mlflow.log_artifact(str(artifact_path), artifact_path=self.artifact_subdir)
             elif artifact_path.is_dir():
                 self._mlflow.log_artifacts(str(artifact_path), artifact_path=self.artifact_subdir)
+
+    @staticmethod
+    def _clean_param_value(value: Any) -> str | int | float | bool:
+        if value is None:
+            return ""
+        if isinstance(value, str | int | float | bool):
+            return value
+        return str(value)
+
+    @staticmethod
+    def _flatten_mapping(
+        prefix: str,
+        values: Mapping[str, Any],
+    ) -> dict[str, str | int | float | bool]:
+        flattened: dict[str, str | int | float | bool] = {}
+        for key, value in values.items():
+            name = f"{prefix}.{key}" if prefix else str(key)
+            if isinstance(value, Mapping):
+                flattened.update(MLflowLogger._flatten_mapping(name, value))
+            else:
+                flattened[name] = MLflowLogger._clean_param_value(value)
+        return flattened
