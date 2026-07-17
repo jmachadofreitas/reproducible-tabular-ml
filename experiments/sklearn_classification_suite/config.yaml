@@ -1,0 +1,73 @@
+study:
+  name: sklearn_classification_benchmark
+  kind: comparison
+  metadata:
+    question: compare sklearn classification baselines across the local classification suite
+
+benchmark:
+  source: sklearn
+  dataset: classification_suite
+  experiment_name: sklearn_classification_benchmark
+
+methods:
+  - name: dummy_classifier
+    transform:
+      policy: tree_default
+    model:
+      kind: dummy
+      backend: sklearn
+      params:
+        strategy: most_frequent
+    metadata:
+      factor.family: baseline
+      factor.estimator: DummyClassifier
+
+  - name: logistic_regression
+    transform:
+      policy: linear_default
+    model:
+      kind: logistic_regression
+      backend: sklearn
+    metadata:
+      factor.family: linear
+      factor.estimator: LogisticRegression
+
+  - name: random_forest_classifier
+    transform:
+      policy: tree_default
+    model:
+      kind: random_forest
+      backend: sklearn
+    metadata:
+      factor.family: tree
+      factor.estimator: RandomForestClassifier
+
+  - name: gradient_boosted_tree_classifier
+    transform:
+      policy: tree_default
+    model:
+      kind: gradient_boosting
+      backend: sklearn
+    metadata:
+      factor.family: boosting
+      factor.estimator: GradientBoostingClassifier
+
+seeds:
+  - 0
+
+execution:
+  executor: ray
+  show_progress: true
+  prediction_dir: ${hydra:runtime.output_dir}/predictions
+  summary_csv: ${hydra:runtime.output_dir}/summary.csv
+  summary_json: ${hydra:runtime.output_dir}/summary.json
+  aggregate_csv: ${hydra:runtime.output_dir}/aggregate.csv
+  aggregate_json: ${hydra:runtime.output_dir}/aggregate.json
+  ray:
+    address: null
+    init: true
+    propagate_uv_runtime_env: false
+    init_kwargs: {}
+
+logger:
+  backend: mlflow
