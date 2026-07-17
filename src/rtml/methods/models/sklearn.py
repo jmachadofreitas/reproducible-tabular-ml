@@ -3,11 +3,14 @@ from __future__ import annotations
 from typing import Any
 
 from sklearn.ensemble import (
+    GradientBoostingClassifier,
+    GradientBoostingRegressor,
     HistGradientBoostingClassifier,
     HistGradientBoostingRegressor,
     RandomForestClassifier,
     RandomForestRegressor,
 )
+from sklearn.dummy import DummyClassifier, DummyRegressor
 from sklearn.linear_model import LinearRegression, LogisticRegression, Ridge
 
 from rtml.methods.base import MethodSpec
@@ -25,6 +28,17 @@ def build_sklearn_estimator(
     """Build a sklearn estimator from a method spec."""
     model_params = dict(method.model.params)
     model_kind = method.model.kind
+
+    if model_kind == "dummy":
+        if task_type == TaskType.REGRESSION:
+            return DummyRegressor(**model_params)
+        return DummyClassifier(**model_params)
+
+    if model_kind == "gradient_boosting":
+        model_params.setdefault("random_state", seed)
+        if task_type == TaskType.REGRESSION:
+            return GradientBoostingRegressor(**model_params)
+        return GradientBoostingClassifier(**model_params)
 
     if model_kind == "logistic_regression":
         if task_type == TaskType.REGRESSION:

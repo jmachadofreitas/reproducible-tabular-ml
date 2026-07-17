@@ -5,6 +5,8 @@ from typing import Any
 
 
 COMPATIBLE_MODEL_BACKENDS: dict[str, set[str]] = {
+    "dummy": {"sklearn"},
+    "gradient_boosting": {"sklearn"},
     "linear_regression": {"sklearn"},
     "logistic_regression": {"sklearn"},
     "ridge": {"sklearn"},
