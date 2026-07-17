@@ -59,7 +59,7 @@ def _save_predictions(
     if prediction_dir is None:
         return None
     run_digest = run_id.rsplit(":", maxsplit=1)[-1]
-    # include the run digest so method variants with the same display name
+    # Include the run digest so distinct method specs with the same display name
     # cannot overwrite each other.
     return str(
         save_prediction_set(
