@@ -3,11 +3,14 @@ from __future__ import annotations
 import csv
 import json
 import math
+from collections.abc import Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeAlias
 
 if TYPE_CHECKING:
     from rtml.runs.base import RunRecord, RunResult
+
+Row: TypeAlias = dict[str, Any]
 
 DEFAULT_AGGREGATE_GROUP_BY = (
     "metadata.study_name",
@@ -19,9 +22,9 @@ DEFAULT_AGGREGATE_GROUP_BY = (
 DEFAULT_TIMING_FIELDS = ("fit_time", "predict_time")
 
 
-def run_record_row(record: RunRecord) -> dict[str, Any]:
+def run_record_row(record: RunRecord) -> Row:
     """Flatten one run record into a summary-table row."""
-    row: dict[str, Any] = {
+    row: Row = {
         "run_id": record.run_id,
         "case_name": record.case_name,
         "dataset_name": record.dataset_name,
@@ -46,7 +49,7 @@ def run_record_row(record: RunRecord) -> dict[str, Any]:
     return row
 
 
-def run_results_table(results: list[RunResult]) -> list[dict[str, Any]]:
+def run_results_table(results: list[RunResult]) -> list[Row]:
     """Convert run results into rows suitable for CSV/JSON reporting."""
     return [run_record_row(result.record) for result in results]
 
@@ -56,7 +59,7 @@ def save_run_summary(
     *,
     csv_path: str | Path | None = None,
     json_path: str | Path | None = None,
-) -> list[dict[str, Any]]:
+) -> list[Row]:
     """Save a lightweight run summary table and return the generated rows."""
     rows = run_results_table(results)
     if csv_path is not None:
@@ -66,33 +69,38 @@ def save_run_summary(
     return rows
 
 
-def load_run_summary(path: str | Path) -> list[dict[str, Any]]:
+def load_run_summary(path: str | Path) -> list[Row]:
     """Load a saved run summary from CSV or JSON."""
     path = Path(path)
     if path.suffix == ".json":
         loaded = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(loaded, list):
             raise ValueError(f"expected a list of rows in {path}")
-        return [dict(row) for row in loaded]
+        rows = []
+        for row in loaded:
+            if not isinstance(row, Mapping):
+                raise ValueError(f"expected row objects in {path}")
+            rows.append(dict(row))
+        return rows
     with path.open(newline="", encoding="utf-8") as file:
         return list(csv.DictReader(file))
 
 
 def aggregate_run_summary(
-    rows: list[dict[str, Any]],
+    rows: list[Row],
     *,
     group_by: tuple[str, ...] = DEFAULT_AGGREGATE_GROUP_BY,
     timing_fields: tuple[str, ...] = DEFAULT_TIMING_FIELDS,
-) -> list[dict[str, Any]]:
+) -> list[Row]:
     """Aggregate per-run summary rows into comparison-ready grouped rows."""
-    groups: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
+    groups: dict[tuple[Any, ...], list[Row]] = {}
     for row in rows:
         key = tuple(row.get(field, "") for field in group_by)
         groups.setdefault(key, []).append(row)
 
     aggregate_rows = []
-    for key, group_rows in sorted(groups.items()):
-        aggregate_row = dict(zip(group_by, key, strict=True))
+    for key, group_rows in groups.items():
+        aggregate_row: Row = dict(zip(group_by, key, strict=True))
         aggregate_row["n_runs"] = len(group_rows)
         aggregate_row["n_success"] = sum(row.get("status") == "success" for row in group_rows)
         aggregate_row["n_failed"] = sum(row.get("status") != "success" for row in group_rows)
@@ -112,13 +120,13 @@ def aggregate_run_summary(
 
 
 def save_aggregate_summary(
-    rows: list[dict[str, Any]],
+    rows: list[Row],
     *,
     csv_path: str | Path | None = None,
     json_path: str | Path | None = None,
     group_by: tuple[str, ...] = DEFAULT_AGGREGATE_GROUP_BY,
     timing_fields: tuple[str, ...] = DEFAULT_TIMING_FIELDS,
-) -> list[dict[str, Any]]:
+) -> list[Row]:
     """Save grouped aggregate reports from a run summary table."""
     aggregate_rows = aggregate_run_summary(
         rows,
@@ -132,62 +140,69 @@ def save_aggregate_summary(
     return aggregate_rows
 
 
-def _write_csv(rows: list[dict[str, Any]], path: Path) -> None:
+def _write_csv(rows: list[Row], path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    fieldnames = sorted({field for row in rows for field in row})
+    fieldnames = _row_fields(rows)
     with path.open("w", newline="", encoding="utf-8") as file:
         writer = csv.DictWriter(file, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)
 
 
-def _write_json(rows: list[dict[str, Any]], path: Path) -> None:
+def _write_json(rows: list[Row], path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(rows, indent=2, sort_keys=True), encoding="utf-8")
+    path.write_text(json.dumps(rows, indent=2), encoding="utf-8")
 
 
 def _aggregate_value_fields(
-    rows: list[dict[str, Any]],
+    rows: list[Row],
     *,
     timing_fields: tuple[str, ...],
 ) -> list[str]:
-    fields = {
-        field
-        for row in rows
-        for field in row
-        if field.startswith("metric.") or field in timing_fields
-    }
-    return sorted(fields)
+    fields: list[str] = []
+    for row in rows:
+        for field in row:
+            if (field.startswith("metric.") or field in timing_fields) and field not in fields:
+                fields.append(field)
+    return fields
+
+
+def _row_fields(rows: list[Row]) -> list[str]:
+    fields: list[str] = []
+    for row in rows:
+        for field in row:
+            if field not in fields:
+                fields.append(field)
+    return fields
 
 
 def _copy_unique_field(
-    aggregate_row: dict[str, Any],
-    rows: list[dict[str, Any]],
+    aggregate_row: Row,
+    rows: list[Row],
     field: str,
 ) -> None:
-    values = sorted({row.get(field) for row in rows if row.get(field) not in {None, ""}})
-    if len(values) == 1:
-        aggregate_row[field] = values[0]
+    value = _consistent_non_empty_value(rows, field)
+    if value is not None:
+        aggregate_row[field] = value
 
 
 def _copy_unique_metadata_fields(
-    aggregate_row: dict[str, Any],
-    rows: list[dict[str, Any]],
+    aggregate_row: Row,
+    rows: list[Row],
 ) -> None:
-    fields = sorted({field for row in rows for field in row if field.startswith("metadata.")})
-    for field in fields:
+    for field in _metadata_fields(rows):
         _copy_unique_field(aggregate_row, rows, field)
 
 
 def _copy_primary_metric_summary(
-    aggregate_row: dict[str, Any],
-    rows: list[dict[str, Any]],
+    aggregate_row: Row,
+    rows: list[Row],
 ) -> None:
-    values = sorted({row.get("primary_metric") for row in rows if row.get("primary_metric")})
-    if len(values) != 1:
+    primary_metric = _consistent_non_empty_value(rows, "primary_metric")
+    if primary_metric is None:
         return
 
-    metric_name = str(values[0])
+    metric_name = str(primary_metric)
     metric_field = f"metric.{metric_name}"
     metric_values = _numeric_values(rows, metric_field)
     aggregate_row["primary_metric_name"] = metric_name
@@ -201,11 +216,37 @@ def _copy_primary_metric_summary(
     aggregate_row["primary_metric_iqr"] = stats["iqr"]
 
 
-def _numeric_values(rows: list[dict[str, Any]], field: str) -> list[float]:
+def _metadata_fields(rows: list[Row]) -> list[str]:
+    fields: list[str] = []
+    for row in rows:
+        for field in row:
+            if field.startswith("metadata.") and field not in fields:
+                fields.append(field)
+    return fields
+
+
+def _consistent_non_empty_value(rows: list[Row], field: str) -> Any | None:
+    sentinel = object()
+    first_value: Any = sentinel
+    for row in rows:
+        value = row.get(field)
+        if value is None or value == "":
+            continue
+        if first_value is sentinel:
+            first_value = value
+            continue
+        if value != first_value:
+            return None
+    if first_value is sentinel:
+        return None
+    return first_value
+
+
+def _numeric_values(rows: list[Row], field: str) -> list[float]:
     values = []
     for row in rows:
         value = row.get(field)
-        if value in {None, ""}:
+        if value is None or value == "":
             continue
         try:
             numeric = float(value)
