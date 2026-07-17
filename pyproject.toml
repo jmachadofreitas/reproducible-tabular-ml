@@ -12,6 +12,7 @@ dependencies = [
     "hydra-ray-launcher",
     "ray[default]",
     "mlflow",
+    "tqdm",
 ]
 
 [dependency-groups]

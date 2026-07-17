@@ -1,6 +1,8 @@
 .untracked/
 .runs/
 mlruns/
+multirun/
+outputs/
 /data
 
 # OS
