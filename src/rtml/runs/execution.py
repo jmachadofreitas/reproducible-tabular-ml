@@ -7,8 +7,11 @@ from dataclasses import asdict, is_dataclass, replace
 from enum import Enum
 import hashlib
 import json
+import os
 from pathlib import Path
 from typing import Any, Protocol
+
+from tqdm import tqdm
 
 from rtml.benchmarks.base import BenchmarkCase, BenchmarkSuite
 from rtml.loggers.base import RunLogger
@@ -255,6 +258,7 @@ class RunExecutor(Protocol):
         prediction_dir: str | Path | None = None,
         logger: RunLogger | None = None,
         continue_on_error: bool = False,
+        show_progress: bool = False,
     ) -> list[RunResult]:
         """Run every `RunSpec` in the plan and return RTML-native results."""
         ...
@@ -337,62 +341,26 @@ class SequentialExecutor:
         prediction_dir: str | Path | None = None,
         logger: RunLogger | None = None,
         continue_on_error: bool = False,
+        show_progress: bool = False,
     ) -> list[RunResult]:
-        results = [
-            _execute_run_spec(
-                run_spec,
-                prediction_dir,
-                continue_on_error=continue_on_error,
+        results = []
+        for run_spec in tqdm(
+            plan.runs,
+            total=len(plan.runs),
+            desc=f"{plan.name} ({self.name})",
+            unit="run",
+            disable=not show_progress,
+        ):
+            results.append(
+                _execute_run_spec(
+                    run_spec,
+                    prediction_dir,
+                    continue_on_error=continue_on_error,
+                )
             )
-            for run_spec in plan.runs
-        ]
         results = _attach_plan_metadata(results, plan.metadata)
         _log_results(results, logger)
         return results
-
-
-def _ray_options(resources: ExecutionResources) -> dict[str, Any]:
-    options: dict[str, Any] = {}
-    if resources.num_cpus is not None:
-        options["num_cpus"] = resources.num_cpus
-    if resources.num_gpus is not None:
-        options["num_gpus"] = resources.num_gpus
-    if resources.memory is not None:
-        options["memory"] = resources.memory
-    if resources.custom:
-        options["resources"] = resources.custom
-    return options
-
-
-def _put_cases(ray: Any, run_specs: Sequence[RunSpec]) -> dict[int, Any]:
-    case_refs = {}
-    for run_spec in run_specs:
-        case_key = id(run_spec.case)
-        if case_key not in case_refs:
-            case_refs[case_key] = ray.put(run_spec.case)
-    return case_refs
-
-
-def _execute_run_spec_with_case(
-    case: BenchmarkCase,
-    method: MethodSpec,
-    resample_id: str,
-    seed: int,
-    runtime: RuntimeSpec | None,
-    prediction_dir: str | Path | None,
-    continue_on_error: bool,
-) -> RunResult:
-    return _execute_run_spec(
-        RunSpec(
-            case=case,
-            method=method,
-            resample_id=resample_id,
-            seed=seed,
-            runtime=runtime,
-        ),
-        prediction_dir,
-        continue_on_error=continue_on_error,
-    )
 
 
 class RayExecutor:
@@ -406,10 +374,12 @@ class RayExecutor:
         address: str | None = None,
         init: bool = True,
         init_kwargs: Mapping[str, Any] | None = None,
+        propagate_uv_runtime_env: bool = False,
     ) -> None:
         self.address = address
         self.init = init
         self.init_kwargs = dict(init_kwargs or {})
+        self.propagate_uv_runtime_env = propagate_uv_runtime_env
 
     def run(
         self,
@@ -418,23 +388,28 @@ class RayExecutor:
         prediction_dir: str | Path | None = None,
         logger: RunLogger | None = None,
         continue_on_error: bool = False,
+        show_progress: bool = False,
     ) -> list[RunResult]:
         try:
             import ray
         except ImportError as exc:
             raise ImportError("RayExecutor requires the optional 'ray' dependency") from exc
 
+        self._configure_uv_runtime_env(
+            ray,
+            propagate_uv_runtime_env=self.propagate_uv_runtime_env,
+        )
         if self.init and not ray.is_initialized():
             ray.init(address=self.address, **self.init_kwargs)
 
         # Cases can carry full data frames. Put each shared case once and pass
         # object refs to per-resample/per-seed tasks.
-        case_refs = _put_cases(ray, plan.runs)
-        remote_run = ray.remote(_execute_run_spec_with_case)
+        case_refs = self._put_cases(ray, plan.runs)
+        remote_run = ray.remote(self._execute_run_spec_with_case)
         refs = []
         for run_spec in plan.runs:
             refs.append(
-                remote_run.options(**_ray_options(run_spec.scheduler_resources)).remote(
+                remote_run.options(**self._ray_options(run_spec.scheduler_resources)).remote(
                     case_refs[id(run_spec.case)],
                     run_spec.method,
                     run_spec.resample_id,
@@ -445,9 +420,102 @@ class RayExecutor:
                 )
             )
 
-        results = _attach_plan_metadata(list(ray.get(refs)), plan.metadata)
+        raw_results = self._get_results(
+            ray,
+            refs,
+            show_progress=show_progress,
+            label=f"{plan.name} ({self.name})",
+        )
+        results = _attach_plan_metadata(raw_results, plan.metadata)
         _log_results(results, logger)
         return results
+
+    @staticmethod
+    def _configure_uv_runtime_env(ray: Any, *, propagate_uv_runtime_env: bool) -> None:
+        enabled = "1" if propagate_uv_runtime_env else "0"
+        os.environ["RAY_ENABLE_UV_RUN_RUNTIME_ENV"] = enabled
+        try:
+            ray._private.ray_constants.RAY_ENABLE_UV_RUN_RUNTIME_ENV = propagate_uv_runtime_env
+        except AttributeError:
+            pass
+
+    @staticmethod
+    def _ray_options(resources: ExecutionResources) -> dict[str, Any]:
+        options: dict[str, Any] = {}
+        if resources.num_cpus is not None:
+            options["num_cpus"] = resources.num_cpus
+        if resources.num_gpus is not None:
+            options["num_gpus"] = resources.num_gpus
+        if resources.memory is not None:
+            options["memory"] = resources.memory
+        if resources.custom:
+            options["resources"] = resources.custom
+        return options
+
+    @staticmethod
+    def _put_cases(ray: Any, run_specs: Sequence[RunSpec]) -> dict[int, Any]:
+        case_refs = {}
+        for run_spec in run_specs:
+            case_key = id(run_spec.case)
+            if case_key not in case_refs:
+                case_refs[case_key] = ray.put(run_spec.case)
+        return case_refs
+
+    @staticmethod
+    def _execute_run_spec_with_case(
+        case: BenchmarkCase,
+        method: MethodSpec,
+        resample_id: str,
+        seed: int,
+        runtime: RuntimeSpec | None,
+        prediction_dir: str | Path | None,
+        continue_on_error: bool,
+    ) -> RunResult:
+        return _execute_run_spec(
+            RunSpec(
+                case=case,
+                method=method,
+                resample_id=resample_id,
+                seed=seed,
+                runtime=runtime,
+            ),
+            prediction_dir,
+            continue_on_error=continue_on_error,
+        )
+
+    @staticmethod
+    def _get_results(
+        ray: Any,
+        refs: Sequence[Any],
+        *,
+        show_progress: bool,
+        label: str,
+    ) -> list[RunResult]:
+        if not show_progress:
+            return list(ray.get(refs))
+        if not refs:
+            return []
+        if not hasattr(ray, "wait"):
+            results = []
+            with tqdm(total=len(refs), desc=label, unit="run") as progress:
+                for ref in refs:
+                    results.append(ray.get(ref))
+                    progress.update()
+            return results
+
+        results_by_position: list[RunResult | None] = [None] * len(refs)
+        pending = list(refs)
+        with tqdm(total=len(refs), desc=label, unit="run") as progress:
+            while pending:
+                ready, pending = ray.wait(pending, num_returns=1)
+                ready_results = ray.get(ready)
+                for ref, result in zip(ready, ready_results, strict=True):
+                    results_by_position[refs.index(ref)] = result
+                progress.update(len(ready))
+
+        if any(result is None for result in results_by_position):
+            raise RuntimeError("Ray completed without returning every run result")
+        return [result for result in results_by_position if result is not None]
 
 
 def run_suite(
@@ -463,6 +531,7 @@ def run_suite(
     plan_name: str | None = None,
     metadata: Mapping[str, Any] | None = None,
     continue_on_error: bool = False,
+    show_progress: bool = False,
 ) -> list[RunResult]:
     """Execute a suite by wrapping it in a default comparison study."""
     study = Study.from_suite(
@@ -480,6 +549,7 @@ def run_suite(
         logger=logger,
         metadata=metadata,
         continue_on_error=continue_on_error,
+        show_progress=show_progress,
     )
 
 
@@ -494,6 +564,7 @@ def run_study(
     logger: RunLogger | None = None,
     metadata: Mapping[str, Any] | None = None,
     continue_on_error: bool = False,
+    show_progress: bool = False,
 ) -> list[RunResult]:
     """Expand a study into an execution plan and execute it."""
     plan = ExecutionPlan.from_study(
@@ -508,6 +579,7 @@ def run_study(
         prediction_dir=prediction_dir,
         logger=logger,
         continue_on_error=continue_on_error,
+        show_progress=show_progress,
     )
 
 
@@ -517,6 +589,7 @@ def run_execution_plan_sequential(
     prediction_dir: str | Path | None = None,
     logger: RunLogger | None = None,
     continue_on_error: bool = False,
+    show_progress: bool = False,
 ) -> list[RunResult]:
     """Execute an execution plan in-process."""
     return SequentialExecutor().run(
@@ -524,6 +597,7 @@ def run_execution_plan_sequential(
         prediction_dir=prediction_dir,
         logger=logger,
         continue_on_error=continue_on_error,
+        show_progress=show_progress,
     )
 
 
@@ -533,6 +607,7 @@ def run_execution_plan_ray(
     prediction_dir: str | Path | None = None,
     logger: RunLogger | None = None,
     continue_on_error: bool = False,
+    show_progress: bool = False,
 ) -> list[RunResult]:
     """Execute an execution plan with Ray, using each `RunSpec`'s resource hints."""
     return RayExecutor().run(
@@ -540,4 +615,5 @@ def run_execution_plan_ray(
         prediction_dir=prediction_dir,
         logger=logger,
         continue_on_error=continue_on_error,
+        show_progress=show_progress,
     )
