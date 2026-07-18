@@ -11,6 +11,7 @@ from rtml.datasets.sklearn_loaders import (
     load_iris_dataset,
     load_sklearn_classification_suite,
     load_sklearn_dataset,
+    load_sklearn_regression_suite,
 )
 from rtml.resampling import ResamplingStrategy
 from rtml.tasks import MetricSpec, TaskSpec, TaskType
@@ -266,3 +267,32 @@ def test_load_sklearn_classification_suite_builds_default_suite() -> None:
     assert all(
         case.resampling.spec.strategy == ResamplingStrategy.STRATIFIED_KFOLD for case in suite.cases
     )
+
+
+def test_load_sklearn_regression_suite_builds_default_suite() -> None:
+    suite = load_sklearn_regression_suite()
+
+    assert suite.name == "sklearn regression"
+    assert [case.dataset.name for case in suite.cases] == [
+        "diabetes",
+        "linear_regression",
+        "friedman1",
+        "friedman1_noisy",
+        "friedman2",
+        "friedman2_noisy",
+        "friedman3",
+        "friedman3_noisy",
+        "s_curve",
+        "s_curve_noisy",
+    ]
+    assert all(case.task.task_type == TaskType.REGRESSION for case in suite.cases)
+    assert all(case.task.primary_metric == "rmse" for case in suite.cases)
+    assert all(case.resampling.spec.strategy == ResamplingStrategy.KFOLD for case in suite.cases)
+    assert all(len(case.resampling.resamples) == 5 for case in suite.cases)
+    assert {case.dataset.metadata.get("generator") for case in suite.cases[1:]} == {
+        "make_regression",
+        "make_friedman1",
+        "make_friedman2",
+        "make_friedman3",
+        "make_s_curve",
+    }
