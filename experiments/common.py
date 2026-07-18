@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from rtml.benchmarks.base import BenchmarkSuite
+from rtml.benchmarks.builders import build_benchmark_suite
 from rtml.builders import (
     build_executor,
     build_logger,
@@ -12,14 +12,13 @@ from rtml.builders import (
     build_scheduler_resources,
     build_study,
 )
-from rtml.datasets.sklearn_loaders import load_sklearn_classification_suite
 from rtml.results.reports import save_aggregate_summary, save_run_summary
 from rtml.runs import run_study
 from rtml.runs.base import RunResult
 
 
 def run_config(config: Mapping[str, Any], *, experiment_name: str) -> list[RunResult]:
-    suite = build_suite(config.get("benchmark", {}))
+    suite = build_benchmark_suite(config.get("benchmark", {}))
     methods = build_methods(config.get("methods", []))
     study = build_study(
         config.get("study", {}),
@@ -56,24 +55,3 @@ def run_config(config: Mapping[str, Any], *, experiment_name: str) -> list[RunRe
         json_path=execution.get("aggregate_json"),
     )
     return results
-
-
-def build_suite(config: Mapping[str, Any] | None) -> BenchmarkSuite:
-    config = config or {}
-    source = config.get("source") or "sklearn"
-    if source != "sklearn":
-        raise ValueError(f"unsupported benchmark source {source!r}")
-
-    dataset_name = str(config.get("dataset") or "classification_suite")
-    if dataset_name != "classification_suite":
-        raise ValueError(
-            "the sklearn classification experiment only supports "
-            "benchmark.dataset='classification_suite'"
-        )
-
-    suite = load_sklearn_classification_suite()
-    return BenchmarkSuite(
-        name=str(config.get("experiment_name") or suite.name),
-        cases=suite.cases,
-        metadata={**suite.metadata, "source": "hydra"},
-    )

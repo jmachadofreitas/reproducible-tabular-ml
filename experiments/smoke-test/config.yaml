@@ -1,13 +1,12 @@
 study:
-  name: sklearn_classification_benchmark
+  name: smoke_test
   kind: comparison
   metadata:
-    question: compare sklearn classification baselines across the local classification suite
+    intent: smoke_test
 
 benchmark:
   source: sklearn
-  dataset: classification_suite
-  experiment_name: sklearn_classification_benchmark
+  suite: classification
 
 methods:
   - name: dummy_classifier
