@@ -4,7 +4,17 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 import pandas as pd
-from sklearn.datasets import load_breast_cancer, load_diabetes, load_iris, load_wine
+from sklearn.datasets import (
+    load_breast_cancer,
+    load_diabetes,
+    load_iris,
+    load_wine,
+    make_friedman1,
+    make_friedman2,
+    make_friedman3,
+    make_regression,
+    make_s_curve,
+)
 from sklearn.model_selection import KFold, StratifiedKFold, train_test_split
 from sklearn.utils import Bunch
 
@@ -210,6 +220,138 @@ def load_diabetes_dataset() -> tuple[Dataset, TaskSpec]:
     return dataset, task
 
 
+def _make_numeric_regression_dataset(
+    *,
+    name: str,
+    x: Any,
+    y: Any,
+    metadata: Mapping[str, Any],
+) -> tuple[Dataset, TaskSpec]:
+    feature_names = [f"x_{index:02d}" for index in range(x.shape[1])]
+    frame = pd.DataFrame(x, columns=feature_names)
+    frame["target"] = y
+
+    features = {
+        column: FeatureInfo(
+            name=column,
+            kind=FeatureKind.NUMERIC,
+            dtype=str(frame[column].dtype),
+        )
+        for column in frame.columns
+    }
+    dataset = Dataset(
+        name=name,
+        data=frame,
+        schema=FeatureSchema(features=features),
+        metadata={
+            "source": "sklearn",
+            **dict(metadata),
+        },
+    )
+    task = _build_task(
+        name=name,
+        dataset=dataset,
+        task_type=TaskType.REGRESSION,
+        metrics=[MetricSpec("rmse"), MetricSpec("mae")],
+        primary_metric="rmse",
+    )
+    return dataset, task
+
+
+def make_synthetic_regression_dataset(
+    *,
+    name: str,
+    n_samples: int,
+    n_features: int,
+    n_informative: int,
+    noise: float,
+    seed: int,
+) -> tuple[Dataset, TaskSpec]:
+    """Create a deterministic linear-style sklearn regression benchmark dataset."""
+    x, y = make_regression( # type: ignore
+        n_samples=n_samples,
+        n_features=n_features,
+        n_informative=n_informative,
+        noise=noise,
+        random_state=seed,
+    )
+    return _make_numeric_regression_dataset(
+        name=name,
+        x=x,
+        y=y,
+        metadata={
+            "generator": "make_regression",
+            "n_samples": n_samples,
+            "n_features": n_features,
+            "n_informative": n_informative,
+            "noise": noise,
+            "seed": seed,
+        },
+    )
+
+
+def make_friedman_regression_dataset(
+    *,
+    name: str,
+    generator: str,
+    n_samples: int,
+    noise: float,
+    seed: int,
+    n_features: int | None = None,
+) -> tuple[Dataset, TaskSpec]:
+    """Create one deterministic Friedman regression benchmark dataset."""
+    if generator == "make_friedman1":
+        x, y = make_friedman1(
+            n_samples=n_samples,
+            n_features=n_features or 10,
+            noise=noise,
+            random_state=seed,
+        )
+    elif generator == "make_friedman2":
+        x, y = make_friedman2(n_samples=n_samples, noise=noise, random_state=seed)
+    elif generator == "make_friedman3":
+        x, y = make_friedman3(n_samples=n_samples, noise=noise, random_state=seed)
+    else:
+        raise ValueError(f"unsupported Friedman generator {generator!r}")
+
+    return _make_numeric_regression_dataset(
+        name=name,
+        x=x,
+        y=y,
+        metadata={
+            "generator": generator,
+            "n_samples": n_samples,
+            "n_features": x.shape[1],
+            "noise": noise,
+            "seed": seed,
+        },
+    )
+
+
+def make_s_curve_regression_dataset(
+    *,
+    name: str,
+    n_samples: int,
+    noise: float,
+    seed: int,
+) -> tuple[Dataset, TaskSpec]:
+    """Create a regression case from sklearn's S-curve manifold generator."""
+    x, y = make_s_curve(n_samples=n_samples, noise=noise, random_state=seed)
+    return _make_numeric_regression_dataset(
+        name=name,
+        x=x,
+        y=y,
+        metadata={
+            "generator": "make_s_curve",
+            "target": "intrinsic_position",
+            "n_samples": n_samples,
+            "n_features": x.shape[1],
+            "noise": noise,
+            "seed": seed,
+        },
+    )
+
+
 def build_sklearn_resampling_spec(
     *,
     name: str,
@@ -398,3 +540,93 @@ def load_sklearn_classification_suite() -> BenchmarkSuite:
         )
 
     return build_sklearn_benchmark_suite(name="sklearn classification", cases=cases)
+
+
+def load_sklearn_regression_suite() -> BenchmarkSuite:
+    """Create a small local sklearn regression suite."""
+    resampling_spec = build_sklearn_resampling_spec(
+        name="sklearn_regression_kfold",
+        strategy=ResamplingStrategy.KFOLD,
+        n_folds=5,
+        shuffle=True,
+        seed=42,
+    )
+
+    dataset_tasks = [
+        load_diabetes_dataset(),
+        make_synthetic_regression_dataset(
+            name="linear_regression",
+            n_samples=220,
+            n_features=12,
+            n_informative=6,
+            noise=8.0,
+            seed=101,
+        ),
+        make_friedman_regression_dataset(
+            name="friedman1",
+            generator="make_friedman1",
+            n_samples=220,
+            n_features=10,
+            noise=0.0,
+            seed=102,
+        ),
+        make_friedman_regression_dataset(
+            name="friedman1_noisy",
+            generator="make_friedman1",
+            n_samples=240,
+            n_features=20,
+            noise=2.0,
+            seed=103,
+        ),
+        make_friedman_regression_dataset(
+            name="friedman2",
+            generator="make_friedman2",
+            n_samples=220,
+            noise=0.0,
+            seed=104,
+        ),
+        make_friedman_regression_dataset(
+            name="friedman2_noisy",
+            generator="make_friedman2",
+            n_samples=240,
+            noise=20.0,
+            seed=105,
+        ),
+        make_friedman_regression_dataset(
+            name="friedman3",
+            generator="make_friedman3",
+            n_samples=220,
+            noise=0.0,
+            seed=106,
+        ),
+        make_friedman_regression_dataset(
+            name="friedman3_noisy",
+            generator="make_friedman3",
+            n_samples=240,
+            noise=0.05,
+            seed=107,
+        ),
+        make_s_curve_regression_dataset(
+            name="s_curve",
+            n_samples=240,
+            noise=0.0,
+            seed=108,
+        ),
+        make_s_curve_regression_dataset(
+            name="s_curve_noisy",
+            n_samples=260,
+            noise=0.08,
+            seed=109,
+        ),
+    ]
+
+    cases = [
+        build_sklearn_benchmark_case(
+            name=dataset.name,
+            dataset=dataset,
+            task=task,
+            resampling_spec=resampling_spec,
+        )
+        for dataset, task in dataset_tasks
+    ]
+    return build_sklearn_benchmark_suite(name="sklearn regression", cases=cases)
