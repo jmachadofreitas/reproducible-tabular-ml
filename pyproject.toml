@@ -3,6 +3,7 @@ name = "rtml"
 version = "0.1.0"
 description = "Reproducible benchmarking for tabular ML methods"
 requires-python = ">=3.11"
+license = { file = "LICENSE" }
 dependencies = [
     "torch",
     "pytorch-ignite",
