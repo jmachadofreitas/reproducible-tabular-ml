@@ -20,19 +20,19 @@ uv sync --dev
 Run the default sklearn classification smoke study:
 
 ```bash
-uv run python experiments/smoke-test/run.py
+uv run python experiments/single_instance/smoke-test/run.py
 ```
 
 Use the sequential or the parallel executor (`ray`) to run the smoke study:
 
 ```bash
-uv run python experiments/smoke-test/run.py execution.executor=sequential # or `ray`
+uv run python experiments/single_instance/smoke-test/run.py execution.executor=sequential # or `ray`
 ```
 
 Override the benchmark suite from the CLI:
 
 ```bash
-uv run python experiments/smoke-test/run.py benchmark.suite=regression
+uv run python experiments/single_instance/smoke-test/run.py benchmark.suite=regression
 ```
 
 Outputs are written under Hydra's `outputs/` directory. Each run stores prediction artifacts plus `summary.csv`, `summary.json`, `aggregate.csv`, and `aggregate.json`.
@@ -44,6 +44,11 @@ The smoke study logs to MLflow by default. Start the local UI with:
 ```bash
 uv run mlflow ui --backend-store-uri sqlite:///.runs/mlflow/mlflow.db
 ```
+
+## Docs
+
+- [Design notes](docs/public/design-notes.md)
+- [Future work](docs/public/future-work.md)
 
 ## Acknowledgements
 

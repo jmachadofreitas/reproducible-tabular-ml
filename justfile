@@ -13,7 +13,7 @@ format:
 check: lint test
 
 study executor="sequential" suite="classification":
-    uv run python experiments/smoke-test/run.py execution.executor={{executor}} benchmark.suite={{suite}}
+    uv run python experiments/single_instance/smoke-test/run.py execution.executor={{executor}} benchmark.suite={{suite}}
 
 mlflow-ui db=".runs/mlflow/mlflow.db" host="127.0.0.1" port="5000":
     mkdir -p .runs/mlflow

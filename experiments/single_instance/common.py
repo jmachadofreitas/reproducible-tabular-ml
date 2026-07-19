@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from rtml.benchmarks.builders import build_benchmark_suite
+from rtml.single_instance.benchmarks.builders import build_benchmark_suite
 from rtml.builders import (
     build_executor,
     build_logger,
@@ -15,6 +15,8 @@ from rtml.builders import (
 from rtml.results.reports import save_aggregate_summary, save_run_summary
 from rtml.runs import run_study
 from rtml.runs.base import RunResult
+
+PARADIGM = "single_instance"
 
 
 def run_config(config: Mapping[str, Any], *, experiment_name: str) -> list[RunResult]:
@@ -40,7 +42,7 @@ def run_config(config: Mapping[str, Any], *, experiment_name: str) -> list[RunRe
         scheduler_resources=scheduler_resources,
         prediction_dir=execution.get("prediction_dir"),
         logger=logger,
-        metadata={"experiment": experiment_name},
+        metadata={"experiment": experiment_name, "paradigm": PARADIGM},
         continue_on_error=bool(execution.get("continue_on_error", False)),
         show_progress=bool(execution.get("show_progress", True)),
     )

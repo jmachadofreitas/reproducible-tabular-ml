@@ -8,14 +8,14 @@ from typing import Any
 import hydra
 from omegaconf import DictConfig, OmegaConf
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
-from experiments import common
+from experiments.single_instance import common
 from rtml.runs.base import RunResult
 
 
 def run_config(config: Mapping[str, Any]) -> list[RunResult]:
-    return common.run_config(config, experiment_name="smoke_test")
+    return common.run_config(config, experiment_name="openml_cc18")
 
 
 @hydra.main(version_base=None, config_path=".", config_name="config")
