@@ -18,10 +18,10 @@ from sklearn.datasets import (
 from sklearn.model_selection import KFold, StratifiedKFold, train_test_split
 from sklearn.utils import Bunch
 
-from rtml.benchmarks.base import BenchmarkCase, BenchmarkSuite
-from rtml.datasets.data import Dataset, FeatureInfo, FeatureKind, FeatureSchema
-from rtml.resampling.base import Resample, ResamplingPlan, ResamplingSpec, ResamplingStrategy
-from rtml.tasks.base import MetricSpec, TaskSpec, TaskType
+from rtml.core.benchmarks import BenchmarkCase, BenchmarkSuite
+from rtml.core.datasets import Dataset, FeatureInfo, FeatureKind, FeatureSchema
+from rtml.core.resampling import Resample, ResamplingPlan, ResamplingSpec, ResamplingStrategy
+from rtml.core.tasks import MetricSpec, TaskSpec, TaskType
 
 SklearnLoader = Callable[..., Bunch]
 
@@ -268,7 +268,7 @@ def make_synthetic_regression_dataset(
     seed: int,
 ) -> tuple[Dataset, TaskSpec]:
     """Create a deterministic linear-style sklearn regression benchmark dataset."""
-    x, y = make_regression( # type: ignore
+    x, y = make_regression(  # type: ignore
         n_samples=n_samples,
         n_features=n_features,
         n_informative=n_informative,

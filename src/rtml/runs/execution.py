@@ -13,7 +13,7 @@ from typing import Any, Protocol
 
 from tqdm import tqdm
 
-from rtml.benchmarks.base import BenchmarkCase, BenchmarkSuite
+from rtml.core.benchmarks import BenchmarkCase, BenchmarkSuite
 from rtml.loggers.base import RunLogger
 from rtml.methods.backends.base import BackendResult, MethodBackend
 from rtml.methods.backends.registry import default_method_backends
@@ -21,8 +21,8 @@ from rtml.methods.base import MethodSpec
 from rtml.results.artifacts import save_prediction_set
 from rtml.runs.base import RunRecord, RunResult, RuntimeSpec
 from rtml.runs.plan import ExecutionResources, RunSpec, ExecutionPlan
-from rtml.studies.base import Study
-from rtml.tasks.base import TaskSpec
+from rtml.core.studies import Study
+from rtml.core.tasks import TaskSpec
 
 
 def _jsonable(value: Any) -> Any:

@@ -6,7 +6,7 @@ from typing import Any, Protocol
 import numpy as np
 from sklearn.metrics import accuracy_score, log_loss, mean_absolute_error, roc_auc_score
 
-from rtml.results.base import PredictionSet
+from rtml.core.results import PredictionSet
 
 
 class MetricRequest(Protocol):

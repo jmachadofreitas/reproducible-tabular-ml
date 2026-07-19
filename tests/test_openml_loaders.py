@@ -6,12 +6,12 @@ import numpy as np
 import pandas as pd
 import pytest
 
-import rtml.datasets.openml_loaders as openml_loaders
-from rtml.benchmarks import BenchmarkSuite
-from rtml.datasets import FeatureKind
-from rtml.datasets.openml_loaders import DEFAULT_OPENML_SPLIT
-from rtml.resampling import ResamplingStrategy
-from rtml.tasks import TaskType
+import rtml.single_instance.datasets.openml_loaders as openml_loaders
+from rtml.core.benchmarks import BenchmarkSuite
+from rtml.core.datasets import FeatureKind
+from rtml.single_instance.datasets.openml_loaders import DEFAULT_OPENML_SPLIT
+from rtml.core.resampling import ResamplingStrategy
+from rtml.core.tasks import TaskType
 
 
 class FakeOpenMLDataset:

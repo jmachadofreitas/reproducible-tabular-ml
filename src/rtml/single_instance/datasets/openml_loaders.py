@@ -9,16 +9,16 @@ import numpy as np
 import openml
 import pandas as pd
 
-from rtml.benchmarks.base import BenchmarkSuite, BenchmarkCase
-from rtml.datasets.data import Dataset, FeatureInfo, FeatureKind, FeatureSchema
-from rtml.resampling.base import (
+from rtml.core.benchmarks import BenchmarkSuite, BenchmarkCase
+from rtml.core.datasets import Dataset, FeatureInfo, FeatureKind, FeatureSchema
+from rtml.core.resampling import (
     Resample,
     ResamplingPlan,
     ResamplingSpec,
     ResamplingStrategy,
     create_openml_resample_id,
 )
-from rtml.tasks.base import MetricSpec, TaskSpec, TaskType
+from rtml.core.tasks import MetricSpec, TaskSpec, TaskType
 
 OPENML_CC18_SUITE_ID = 99
 DEFAULT_OPENML_SPLIT = {"repeat": 0, "fold": 0, "sample": 0}

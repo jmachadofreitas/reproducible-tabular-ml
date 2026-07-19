@@ -15,7 +15,7 @@ from sklearn.linear_model import LinearRegression, LogisticRegression, Ridge
 
 from rtml.methods.base import MethodSpec
 from rtml.runtime import RuntimeSpec
-from rtml.tasks.base import TaskType
+from rtml.core.tasks import TaskType
 
 
 def build_sklearn_estimator(

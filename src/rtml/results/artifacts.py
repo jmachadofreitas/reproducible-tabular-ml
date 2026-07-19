@@ -7,7 +7,7 @@ from typing import Any
 
 import numpy as np
 
-from rtml.results.base import PredictionSet
+from rtml.core.results import PredictionSet
 from rtml.tasks.metrics import MetricRequest, compute_metrics
 
 _ARRAY_FIELDS = ("row_ids", "y_true", "labels", "probabilities", "scores", "values")
@@ -41,7 +41,7 @@ def save_prediction_set(predictions: PredictionSet, path: str | Path) -> Path:
         for field in _ARRAY_FIELDS
         if (array := _optional_array(getattr(predictions, field))) is not None
     }
-    np.savez_compressed(artifact_path, metadata_json=json.dumps(payload), **arrays) # pyright: ignore[reportArgumentType]
+    np.savez_compressed(artifact_path, metadata_json=json.dumps(payload), **arrays)  # pyright: ignore[reportArgumentType]
     return artifact_path
 
 

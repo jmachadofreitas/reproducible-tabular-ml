@@ -5,9 +5,9 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from rtml.benchmarks.base import BenchmarkSuite
-from rtml.datasets.openml_loaders import OPENML_CC18_SUITE_ID, load_openml_suite
-from rtml.datasets.sklearn_loaders import (
+from rtml.core.benchmarks import BenchmarkSuite
+from rtml.single_instance.datasets.openml_loaders import OPENML_CC18_SUITE_ID, load_openml_suite
+from rtml.single_instance.datasets.sklearn_loaders import (
     load_sklearn_classification_suite,
     load_sklearn_regression_suite,
 )

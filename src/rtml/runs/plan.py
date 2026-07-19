@@ -10,10 +10,10 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from rtml.benchmarks.base import BenchmarkCase, BenchmarkSuite
+from rtml.core.benchmarks import BenchmarkCase, BenchmarkSuite
 from rtml.methods.base import MethodSpec
 from rtml.runtime import RuntimeSpec
-from rtml.studies.base import Study
+from rtml.core.studies import Study
 
 
 @dataclass(frozen=True)
@@ -121,6 +121,7 @@ class ExecutionPlan:
             scheduler_resources=scheduler_resources,
             metadata=study_metadata,
         )
+
 
 def _validate_method_name_keys(
     *,

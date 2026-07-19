@@ -4,9 +4,9 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from rtml.datasets.data import Dataset
-    from rtml.resampling.base import ResamplingPlan
-    from rtml.tasks.base import TaskSpec
+    from rtml.core.datasets import Dataset
+    from rtml.core.resampling import ResamplingPlan
+    from rtml.core.tasks import TaskSpec
 
 
 @dataclass

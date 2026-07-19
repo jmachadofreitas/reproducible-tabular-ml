@@ -1,3 +1,3 @@
-from rtml.results.base import PredictionSet
+from rtml.core.results import PredictionSet
 
 __all__ = ["PredictionSet"]

@@ -5,7 +5,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from rtml.datasets.data import Dataset
+    from rtml.core.datasets import Dataset
 
 
 class TaskType(str, Enum):

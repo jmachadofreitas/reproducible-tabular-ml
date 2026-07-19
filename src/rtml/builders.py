@@ -5,13 +5,13 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from rtml.benchmarks.base import BenchmarkSuite
+from rtml.core.benchmarks import BenchmarkSuite
 from rtml.loggers.base import RunLogger
 from rtml.loggers.mlflow import MLflowLogger
 from rtml.methods.base import MethodSpec, ModelSpec
 from rtml.runs import RayExecutor, ExecutionResources, RunExecutor, SequentialExecutor
 from rtml.runtime import RuntimeSpec
-from rtml.studies import Study, StudyKind
+from rtml.core.studies import Study, StudyKind
 
 
 def build_methods(config: Sequence[Mapping[str, Any]] | None) -> list[MethodSpec]:

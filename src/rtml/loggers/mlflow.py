@@ -101,6 +101,8 @@ class MLflowLogger:
             "rtml.task": record.task_name,
             "rtml.method": record.method.name,
         }
+        if "paradigm" in record.metadata:
+            tags["rtml.paradigm"] = str(record.metadata["paradigm"])
         if record.error is not None:
             tags["rtml.error"] = record.error
         self._mlflow.set_tags(tags)

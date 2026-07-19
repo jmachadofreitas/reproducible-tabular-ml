@@ -30,6 +30,7 @@ class FeatureTag(str, Enum):
     HIGH_CARDINALITY = "high_cardinality"
     BOUNDED = "bounded"
 
+
 FeatureTagLike = FeatureTag | str
 
 

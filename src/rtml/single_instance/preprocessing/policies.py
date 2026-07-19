@@ -15,8 +15,8 @@ from sklearn.preprocessing import (
     StandardScaler,
 )
 
-from rtml.datasets.data import Dataset, FeatureKind, FeatureTag
-from rtml.tasks.base import TaskSpec
+from rtml.core.datasets import Dataset, FeatureKind, FeatureTag
+from rtml.core.tasks import TaskSpec
 
 PreprocessorBuilder = Callable[[Dataset, TaskSpec, Mapping[str, Any]], ColumnTransformer]
 

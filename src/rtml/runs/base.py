@@ -6,9 +6,9 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from rtml.methods.base import MethodSpec
-from rtml.results.base import PredictionSet
+from rtml.core.results import PredictionSet
 from rtml.runtime import RuntimeSpec
-from rtml.tasks.base import TaskType
+from rtml.core.tasks import TaskType
 
 
 @dataclass(frozen=True)

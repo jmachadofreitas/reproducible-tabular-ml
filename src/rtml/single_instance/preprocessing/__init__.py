@@ -1,4 +1,4 @@
-from rtml.preprocessing.policies import (
+from rtml.single_instance.preprocessing.policies import (
     PREPROCESSING_POLICIES,
     build_preprocessor,
     get_preprocessing_policy,

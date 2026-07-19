@@ -5,7 +5,7 @@ from enum import StrEnum
 from collections.abc import Sequence
 from typing import Any
 
-from rtml.benchmarks.base import BenchmarkCase, BenchmarkSuite
+from rtml.core.benchmarks import BenchmarkCase, BenchmarkSuite
 from rtml.methods.base import MethodSpec
 
 

@@ -5,15 +5,15 @@ from time import perf_counter
 import numpy as np
 from sklearn.pipeline import Pipeline
 
-from rtml.benchmarks.base import BenchmarkCase
+from rtml.core.benchmarks import BenchmarkCase
 from rtml.methods.backends.base import BackendResult, MethodBackend
 from rtml.methods.base import MethodSpec
 from rtml.methods.models.sklearn import build_sklearn_estimator
-from rtml.preprocessing import build_preprocessor
-from rtml.resampling.base import Resample
-from rtml.results.base import PredictionSet
+from rtml.single_instance.preprocessing import build_preprocessor
+from rtml.core.resampling import Resample
+from rtml.core.results import PredictionSet
 from rtml.runtime import RuntimeSpec
-from rtml.tasks.base import TaskType
+from rtml.core.tasks import TaskType
 from rtml.tasks.metrics import compute_metrics
 
 
