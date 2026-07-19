@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from rtml.runs.base import RunRecord
+    from rtml.core.runs import RunRecord
 
 DEFAULT_MLFLOW_EXPERIMENT_NAME = "rtml"
 DEFAULT_MLFLOW_TRACKING_URI = "sqlite:///.runs/mlflow/mlflow.db"

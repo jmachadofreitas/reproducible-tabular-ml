@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
-    from rtml.runs.base import RunRecord
+    from rtml.core.runs import RunRecord
 
 
 class RunLogger(Protocol):

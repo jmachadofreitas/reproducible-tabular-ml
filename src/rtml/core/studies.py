@@ -6,7 +6,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from rtml.core.benchmarks import BenchmarkCase, BenchmarkSuite
-from rtml.methods.base import MethodSpec
+from rtml.core.methods import MethodSpec
 
 
 class StudyKind(StrEnum):

@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeAlias
 
 if TYPE_CHECKING:
-    from rtml.runs.base import RunRecord, RunResult
+    from rtml.core.runs import RunRecord, RunResult
 
 Row: TypeAlias = dict[str, Any]
 

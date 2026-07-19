@@ -8,9 +8,10 @@ from typing import Any
 from rtml.core.benchmarks import BenchmarkSuite
 from rtml.loggers.base import RunLogger
 from rtml.loggers.mlflow import MLflowLogger
-from rtml.methods.base import MethodSpec, ModelSpec
-from rtml.runs import RayExecutor, ExecutionResources, RunExecutor, SequentialExecutor
-from rtml.runtime import RuntimeSpec
+from rtml.core.methods import MethodSpec, ModelSpec
+from rtml.core.runs import ExecutionResources
+from rtml.runs import RayExecutor, RunExecutor, SequentialExecutor
+from rtml.core.runtime import RuntimeSpec
 from rtml.core.studies import Study, StudyKind
 
 

@@ -14,7 +14,8 @@ from rtml.builders import (
 )
 from rtml.results.reports import save_aggregate_summary, save_run_summary
 from rtml.runs import run_study
-from rtml.runs.base import RunResult
+from rtml.core.runs import RunResult
+from rtml.single_instance.methods.sklearn import default_single_instance_backends
 
 PARADIGM = "single_instance"
 
@@ -36,6 +37,7 @@ def run_config(config: Mapping[str, Any], *, experiment_name: str) -> list[RunRe
 
     results = run_study(
         study=study,
+        backends=default_single_instance_backends(),
         seeds=list(config.get("seeds", [0])),
         executor=executor,
         runtime_specs=runtime_specs,

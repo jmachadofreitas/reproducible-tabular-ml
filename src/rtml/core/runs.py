@@ -1,19 +1,17 @@
-"""Run planning across studies and benchmark suites.
-
-This module turns a `Study` or `BenchmarkSuite` into concrete `RunSpec` objects. The
-actual execution APIs live in `rtml.runs.execution`.
-"""
+"""Run planning and records used for reproducible execution."""
 
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 from rtml.core.benchmarks import BenchmarkCase, BenchmarkSuite
-from rtml.methods.base import MethodSpec
-from rtml.runtime import RuntimeSpec
+from rtml.core.methods import MethodSpec
+from rtml.core.results import PredictionSet
+from rtml.core.runtime import RuntimeSpec
 from rtml.core.studies import Study
+from rtml.core.tasks import TaskType
 
 
 @dataclass(frozen=True)
@@ -63,11 +61,7 @@ class ExecutionPlan:
         scheduler_resources: Mapping[str, ExecutionResources] | None = None,
         metadata: Mapping[str, Any] | None = None,
     ) -> ExecutionPlan:
-        """Expand a suite and method list into concrete `RunSpec` objects.
-
-        Runtime specs and scheduler resources are selected by exact method name.
-        Missing entries mean the method/backend uses its library defaults.
-        """
+        """Expand a suite and method list into concrete `RunSpec` objects."""
         run_specs: list[RunSpec] = []
         runtime_map = runtime_specs or {}
         resource_map = scheduler_resources or {}
@@ -121,6 +115,37 @@ class ExecutionPlan:
             scheduler_resources=scheduler_resources,
             metadata=study_metadata,
         )
+
+
+@dataclass(frozen=True)
+class RunRecord:
+    """Observed output and reproducibility metadata for one executed run."""
+
+    run_id: str
+    case_name: str
+    dataset_name: str
+    dataset_fingerprint: str
+    task_name: str
+    task_type: TaskType
+    primary_metric: str | None
+    resampling_plan_fingerprint: str
+    resample_id: str
+    method: MethodSpec
+    seed: int
+    runtime: RuntimeSpec
+    status: Literal["success", "failed"]
+    metrics: dict[str, float] = field(default_factory=dict)
+    fit_time: float | None = None
+    predict_time: float | None = None
+    prediction_path: str | None = None
+    error: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class RunResult:
+    predictions: PredictionSet | None
+    record: RunRecord
 
 
 def _validate_method_name_keys(

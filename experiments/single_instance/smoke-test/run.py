@@ -11,7 +11,7 @@ from omegaconf import DictConfig, OmegaConf
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from experiments.single_instance import common
-from rtml.runs.base import RunResult
+from rtml.core.runs import RunResult
 
 
 def run_config(config: Mapping[str, Any]) -> list[RunResult]:

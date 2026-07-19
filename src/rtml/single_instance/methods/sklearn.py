@@ -1,20 +1,106 @@
 from __future__ import annotations
 
 from time import perf_counter
+from typing import Any
 
 import numpy as np
+from sklearn.ensemble import (
+    GradientBoostingClassifier,
+    GradientBoostingRegressor,
+    HistGradientBoostingClassifier,
+    HistGradientBoostingRegressor,
+    RandomForestClassifier,
+    RandomForestRegressor,
+)
+from sklearn.dummy import DummyClassifier, DummyRegressor
+from sklearn.linear_model import LinearRegression, LogisticRegression, Ridge
 from sklearn.pipeline import Pipeline
 
 from rtml.core.benchmarks import BenchmarkCase
-from rtml.methods.backends.base import BackendResult, MethodBackend
-from rtml.methods.base import MethodSpec
-from rtml.methods.models.sklearn import build_sklearn_estimator
-from rtml.single_instance.preprocessing import build_preprocessor
+from rtml.core.methods import MethodSpec
+from rtml.core.metrics import compute_metrics
 from rtml.core.resampling import Resample
 from rtml.core.results import PredictionSet
-from rtml.runtime import RuntimeSpec
+from rtml.core.runtime import RuntimeSpec
 from rtml.core.tasks import TaskType
-from rtml.tasks.metrics import compute_metrics
+from rtml.methods.backends.base import BackendResult, MethodBackend
+from rtml.single_instance.preprocessing import build_preprocessor
+
+SUPPORTED_SKLEARN_MODEL_KINDS = frozenset(
+    {
+        "boosted_trees",
+        "dummy",
+        "gradient_boosting",
+        "linear_regression",
+        "logistic_regression",
+        "random_forest",
+        "ridge",
+    }
+)
+
+
+def build_sklearn_estimator(
+    *,
+    task_type: TaskType,
+    method: MethodSpec,
+    seed: int,
+    runtime: RuntimeSpec | None = None,
+) -> Any:
+    """Build a sklearn estimator from a method spec."""
+    model_params = dict(method.model.params)
+    model_kind = method.model.kind
+    if model_kind not in SUPPORTED_SKLEARN_MODEL_KINDS:
+        raise NotImplementedError(f"unsupported sklearn model kind {model_kind!r}")
+
+    if model_kind == "dummy":
+        if task_type == TaskType.REGRESSION:
+            return DummyRegressor(**model_params)
+        return DummyClassifier(**model_params)
+
+    if model_kind == "gradient_boosting":
+        model_params.setdefault("random_state", seed)
+        if task_type == TaskType.REGRESSION:
+            return GradientBoostingRegressor(**model_params)
+        return GradientBoostingClassifier(**model_params)
+
+    if model_kind == "logistic_regression":
+        if task_type == TaskType.REGRESSION:
+            raise ValueError("logistic_regression does not support regression tasks")
+        model_params.setdefault("max_iter", 1000)
+        model_params.setdefault("random_state", seed)
+        return LogisticRegression(**model_params)
+
+    if model_kind == "ridge":
+        if task_type != TaskType.REGRESSION:
+            raise ValueError("ridge only supports regression tasks")
+        model_params.setdefault("random_state", seed)
+        return Ridge(**model_params)
+
+    if model_kind == "linear_regression":
+        if task_type != TaskType.REGRESSION:
+            raise ValueError("linear_regression only supports regression tasks")
+        return LinearRegression(**model_params)
+
+    if model_kind == "random_forest":
+        model_params.setdefault("random_state", seed)
+        if runtime is not None and runtime.num_threads is not None:
+            model_params.setdefault("n_jobs", runtime.num_threads)
+        if task_type == TaskType.REGRESSION:
+            return RandomForestRegressor(**model_params)
+        return RandomForestClassifier(**model_params)
+
+    if model_kind == "boosted_trees":
+        model_params.setdefault("random_state", seed)
+        if task_type == TaskType.REGRESSION:
+            return HistGradientBoostingRegressor(**model_params)
+        return HistGradientBoostingClassifier(**model_params)
+
+    raise AssertionError(f"unhandled sklearn model kind {model_kind!r}")
+
+
+def default_single_instance_backends() -> tuple[MethodBackend, ...]:
+    """Return built-in single-instance method backends."""
+    return (SklearnBackend(),)
 
 
 def _find_resample(case: BenchmarkCase, resample_id: str | None) -> Resample:
@@ -60,9 +146,7 @@ def _make_prediction_set(
 
     labels = estimator.predict(x_test)
     probabilities = estimator.predict_proba(x_test) if hasattr(estimator, "predict_proba") else None
-    scores = (
-        estimator.decision_function(x_test) if hasattr(estimator, "decision_function") else None
-    )
+    scores = estimator.decision_function(x_test) if hasattr(estimator, "decision_function") else None
     return PredictionSet(
         dataset_name=case.dataset.name,
         task_name=case.task.name,
@@ -78,9 +162,10 @@ def _make_prediction_set(
 
 
 class SklearnBackend(MethodBackend):
-    """Method backend for estimators that follow the scikit-learn API."""
+    """Single-instance backend for estimators that follow the scikit-learn API."""
 
     name = "sklearn"
+    supported_model_kinds = SUPPORTED_SKLEARN_MODEL_KINDS
 
     def run(
         self,

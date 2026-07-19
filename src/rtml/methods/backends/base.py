@@ -3,9 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
 
-from rtml.methods.base import MethodSpec
 from rtml.core.results import PredictionSet
-from rtml.runtime import RuntimeSpec
+from rtml.core.methods import MethodSpec
+from rtml.core.runtime import RuntimeSpec
 
 if TYPE_CHECKING:
     from rtml.core.benchmarks import BenchmarkCase
@@ -26,6 +26,7 @@ class MethodBackend(Protocol):
     """Execution backend for one family of method implementations."""
 
     name: str
+    supported_model_kinds: frozenset[str]
 
     def run(
         self,

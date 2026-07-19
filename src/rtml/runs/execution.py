@@ -16,11 +16,10 @@ from tqdm import tqdm
 from rtml.core.benchmarks import BenchmarkCase, BenchmarkSuite
 from rtml.loggers.base import RunLogger
 from rtml.methods.backends.base import BackendResult, MethodBackend
-from rtml.methods.backends.registry import default_method_backends
-from rtml.methods.base import MethodSpec
+from rtml.core.methods import MethodSpec
 from rtml.results.artifacts import save_prediction_set
-from rtml.runs.base import RunRecord, RunResult, RuntimeSpec
-from rtml.runs.plan import ExecutionResources, RunSpec, ExecutionPlan
+from rtml.core.runs import ExecutionPlan, ExecutionResources, RunRecord, RunResult, RunSpec
+from rtml.core.runtime import RuntimeSpec
 from rtml.core.studies import Study
 from rtml.core.tasks import TaskSpec
 
@@ -41,8 +40,7 @@ def _jsonable(value: Any) -> Any:
     return str(value)
 
 
-def _default_backend_by_name() -> dict[str, MethodBackend]:
-    backends = default_method_backends()
+def _backend_by_name(backends: Sequence[MethodBackend]) -> dict[str, MethodBackend]:
     backend_by_name = {backend.name: backend for backend in backends}
     if len(backend_by_name) != len(backends):
         backend_names = [backend.name for backend in backends]
@@ -198,6 +196,7 @@ def run_method(
     *,
     case: BenchmarkCase,
     method: MethodSpec,
+    backends: Sequence[MethodBackend],
     resample_id: str | None = None,
     seed: int = 0,
     runtime: RuntimeSpec | None = None,
@@ -206,13 +205,19 @@ def run_method(
 ) -> RunResult:
     """Execute one complete method on one benchmark case/resample."""
     requested_backend = method.model.backend
-    backend_by_name = _default_backend_by_name()
+    backend_by_name = _backend_by_name(backends)
     selected_backend = backend_by_name.get(requested_backend)
     if selected_backend is None:
         available_backends = ", ".join(backend_by_name) or "<none>"
         raise ValueError(
             f"no method backend named {requested_backend!r} "
             f"for method {method.name!r}; available backends: {available_backends}"
+        )
+    if method.model.kind not in selected_backend.supported_model_kinds:
+        supported = ", ".join(sorted(selected_backend.supported_model_kinds)) or "<none>"
+        raise ValueError(
+            f"method backend {requested_backend!r} does not support model kind "
+            f"{method.model.kind!r}; supported model kinds: {supported}"
         )
 
     # Backend execution owns fitting, predicting, and backend-level metrics.
@@ -255,6 +260,7 @@ class RunExecutor(Protocol):
         self,
         plan: ExecutionPlan,
         *,
+        backends: Sequence[MethodBackend],
         prediction_dir: str | Path | None = None,
         logger: RunLogger | None = None,
         continue_on_error: bool = False,
@@ -300,12 +306,14 @@ def _execute_run_spec(
     run_spec: RunSpec,
     prediction_dir: str | Path | None,
     *,
+    backends: Sequence[MethodBackend],
     continue_on_error: bool,
 ) -> RunResult:
     try:
         return run_method(
             case=run_spec.case,
             method=run_spec.method,
+            backends=backends,
             resample_id=run_spec.resample_id,
             seed=run_spec.seed,
             runtime=run_spec.runtime,
@@ -338,6 +346,7 @@ class SequentialExecutor:
         self,
         plan: ExecutionPlan,
         *,
+        backends: Sequence[MethodBackend],
         prediction_dir: str | Path | None = None,
         logger: RunLogger | None = None,
         continue_on_error: bool = False,
@@ -355,6 +364,7 @@ class SequentialExecutor:
                 _execute_run_spec(
                     run_spec,
                     prediction_dir,
+                    backends=backends,
                     continue_on_error=continue_on_error,
                 )
             )
@@ -385,6 +395,7 @@ class RayExecutor:
         self,
         plan: ExecutionPlan,
         *,
+        backends: Sequence[MethodBackend],
         prediction_dir: str | Path | None = None,
         logger: RunLogger | None = None,
         continue_on_error: bool = False,
@@ -415,6 +426,7 @@ class RayExecutor:
                     run_spec.resample_id,
                     run_spec.seed,
                     run_spec.runtime,
+                    backends,
                     prediction_dir,
                     continue_on_error,
                 )
@@ -468,6 +480,7 @@ class RayExecutor:
         resample_id: str,
         seed: int,
         runtime: RuntimeSpec | None,
+        backends: Sequence[MethodBackend],
         prediction_dir: str | Path | None,
         continue_on_error: bool,
     ) -> RunResult:
@@ -480,6 +493,7 @@ class RayExecutor:
                 runtime=runtime,
             ),
             prediction_dir,
+            backends=backends,
             continue_on_error=continue_on_error,
         )
 
@@ -522,6 +536,7 @@ def run_suite(
     *,
     suite: BenchmarkSuite,
     methods: Sequence[MethodSpec],
+    backends: Sequence[MethodBackend],
     seeds: Sequence[int] = (0,),
     executor: RunExecutor | None = None,
     runtime_specs: Mapping[str, RuntimeSpec] | None = None,
@@ -541,6 +556,7 @@ def run_suite(
     )
     return run_study(
         study=study,
+        backends=backends,
         seeds=seeds,
         executor=executor,
         runtime_specs=runtime_specs,
@@ -556,6 +572,7 @@ def run_suite(
 def run_study(
     *,
     study: Study,
+    backends: Sequence[MethodBackend],
     seeds: Sequence[int] = (0,),
     executor: RunExecutor | None = None,
     runtime_specs: Mapping[str, RuntimeSpec] | None = None,
@@ -576,6 +593,7 @@ def run_study(
     )
     return (executor or SequentialExecutor()).run(
         plan,
+        backends=backends,
         prediction_dir=prediction_dir,
         logger=logger,
         continue_on_error=continue_on_error,
@@ -586,6 +604,7 @@ def run_study(
 def run_execution_plan_sequential(
     plan: ExecutionPlan,
     *,
+    backends: Sequence[MethodBackend],
     prediction_dir: str | Path | None = None,
     logger: RunLogger | None = None,
     continue_on_error: bool = False,
@@ -594,6 +613,7 @@ def run_execution_plan_sequential(
     """Execute an execution plan in-process."""
     return SequentialExecutor().run(
         plan,
+        backends=backends,
         prediction_dir=prediction_dir,
         logger=logger,
         continue_on_error=continue_on_error,
@@ -604,6 +624,7 @@ def run_execution_plan_sequential(
 def run_execution_plan_ray(
     plan: ExecutionPlan,
     *,
+    backends: Sequence[MethodBackend],
     prediction_dir: str | Path | None = None,
     logger: RunLogger | None = None,
     continue_on_error: bool = False,
@@ -612,6 +633,7 @@ def run_execution_plan_ray(
     """Execute an execution plan with Ray, using each `RunSpec`'s resource hints."""
     return RayExecutor().run(
         plan,
+        backends=backends,
         prediction_dir=prediction_dir,
         logger=logger,
         continue_on_error=continue_on_error,

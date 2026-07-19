@@ -1,3 +1,1 @@
-from rtml.methods.base import MethodSpec, ModelSpec
-
-__all__ = ["MethodSpec", "ModelSpec"]
+"""Method implementations, backends, and training engines."""
