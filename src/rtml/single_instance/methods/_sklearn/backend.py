@@ -26,17 +26,15 @@ from rtml.core.tasks import TaskType
 from rtml.methods.backends.base import BackendResult, MethodBackend
 from rtml.single_instance.preprocessing import build_preprocessor
 
-SUPPORTED_SKLEARN_MODEL_KINDS = frozenset(
-    {
-        "boosted_trees",
-        "dummy",
-        "gradient_boosting",
-        "linear_regression",
-        "logistic_regression",
-        "random_forest",
-        "ridge",
-    }
-)
+SUPPORTED_SKLEARN_MODEL_KINDS = {
+    "boosted_trees",
+    "dummy",
+    "gradient_boosting",
+    "linear_regression",
+    "logistic_regression",
+    "random_forest",
+    "ridge",
+}
 
 
 def build_sklearn_estimator(
@@ -100,24 +98,9 @@ def build_sklearn_estimator(
 
 def default_single_instance_backends() -> tuple[MethodBackend, ...]:
     """Return built-in single-instance method backends."""
-    return (SklearnBackend(),)
+    from rtml.single_instance.methods._torch import TorchBackend
 
-
-def _find_resample(case: BenchmarkCase, resample_id: str | None) -> Resample:
-    if not case.resampling.resamples:
-        raise ValueError(f"benchmark case {case.name!r} has no resamples")
-    if resample_id is None:
-        return case.resampling.resamples[0]
-    for resample in case.resampling.resamples:
-        if resample.id == resample_id:
-            return resample
-    raise ValueError(f"unknown resample id {resample_id!r}")
-
-
-def _row_ids(case: BenchmarkCase, indices: np.ndarray) -> np.ndarray:
-    if case.dataset.row_id is not None:
-        return case.dataset.data.iloc[indices][case.dataset.row_id].to_numpy()
-    return np.asarray(indices)
+    return (SklearnBackend(), TorchBackend())
 
 
 def _make_prediction_set(
@@ -138,7 +121,7 @@ def _make_prediction_set(
             task_name=case.task.name,
             method_name=method.name,
             resample_id=resample.id,
-            row_ids=_row_ids(case, resample.test_idx),
+            row_ids=case.dataset.row_ids_for(resample.test_idx),
             y_true=y_true,
             values=np.asarray(values),
             metadata={"case_name": case.name},
@@ -146,13 +129,15 @@ def _make_prediction_set(
 
     labels = estimator.predict(x_test)
     probabilities = estimator.predict_proba(x_test) if hasattr(estimator, "predict_proba") else None
-    scores = estimator.decision_function(x_test) if hasattr(estimator, "decision_function") else None
+    scores = (
+        estimator.decision_function(x_test) if hasattr(estimator, "decision_function") else None
+    )
     return PredictionSet(
         dataset_name=case.dataset.name,
         task_name=case.task.name,
         method_name=method.name,
         resample_id=resample.id,
-        row_ids=_row_ids(case, resample.test_idx),
+        row_ids=case.dataset.row_ids_for(resample.test_idx),
         y_true=y_true,
         labels=np.asarray(labels),
         probabilities=None if probabilities is None else np.asarray(probabilities),
@@ -165,7 +150,14 @@ class SklearnBackend(MethodBackend):
     """Single-instance backend for estimators that follow the scikit-learn API."""
 
     name = "sklearn"
-    supported_model_kinds = SUPPORTED_SKLEARN_MODEL_KINDS
+
+    def validate_method(self, method: MethodSpec) -> None:
+        if method.model.kind not in SUPPORTED_SKLEARN_MODEL_KINDS:
+            supported = ", ".join(sorted(SUPPORTED_SKLEARN_MODEL_KINDS))
+            raise ValueError(
+                f"sklearn backend does not support model kind {method.model.kind!r}; "
+                f"supported model kinds: {supported}"
+            )
 
     def run(
         self,
@@ -175,9 +167,11 @@ class SklearnBackend(MethodBackend):
         resample_id: str | None = None,
         seed: int = 0,
         runtime: RuntimeSpec | None = None,
+        logger: Any | None = None,
     ) -> BackendResult:
+        self.validate_method(method)
         case.task.validate_columns(case.dataset)
-        resample = _find_resample(case, resample_id)
+        resample = case.resampling.get_resample(resample_id)
 
         transform_config = dict(method.transform)
         policy = transform_config.pop("policy", "linear_default")

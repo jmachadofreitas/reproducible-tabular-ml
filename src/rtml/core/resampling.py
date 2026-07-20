@@ -162,6 +162,19 @@ class ResamplingPlan:
         digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
         return f"sha256:{digest}"
 
+    def get_resample(self, resample_id: str | None = None) -> Resample:
+        """Return one materialized resample by id, or the first one by default."""
+        if not self.resamples:
+            raise ValueError(
+                f"resampling plan for {self.dataset_name!r}/{self.task_name!r} has no resamples"
+            )
+        if resample_id is None:
+            return self.resamples[0]
+        for resample in self.resamples:
+            if resample.id == resample_id:
+                return resample
+        raise ValueError(f"unknown resample id {resample_id!r}")
+
 
 def create_openml_resample_id(*, repeat: int, fold: int, sample: int) -> str:
     return f"repeat_{repeat:02d}_fold_{fold:02d}_sample_{sample:02d}"

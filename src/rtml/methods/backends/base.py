@@ -23,10 +23,11 @@ class BackendResult:
 
 
 class MethodBackend(Protocol):
-    """Execution backend for one family of method implementations."""
-
     name: str
-    supported_model_kinds: frozenset[str]
+
+    def validate_method(self, method: MethodSpec) -> None:
+        """Reject methods this backend cannot execute."""
+        ...
 
     def run(
         self,
@@ -36,6 +37,7 @@ class MethodBackend(Protocol):
         resample_id: str | None = None,
         seed: int = 0,
         runtime: RuntimeSpec | None = None,
+        logger: Any | None = None,
     ) -> BackendResult:
         """Execute one method on one benchmark case/resample."""
         ...
