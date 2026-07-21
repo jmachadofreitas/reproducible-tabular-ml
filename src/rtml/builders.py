@@ -6,13 +6,12 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from rtml.core.benchmarks import BenchmarkSuite
-from rtml.loggers.base import RunLogger
-from rtml.loggers.mlflow import MLflowLogger
 from rtml.core.methods import MethodSpec, ModelSpec
 from rtml.core.runs import ExecutionResources
-from rtml.runs import RayExecutor, RunExecutor, SequentialExecutor
 from rtml.core.runtime import RuntimeSpec
 from rtml.core.studies import Study, StudyKind
+from rtml.loggers import build_logger as build_logger
+from rtml.runs import RayExecutor, RunExecutor, SequentialExecutor
 
 
 def build_methods(config: Sequence[Mapping[str, Any]] | None) -> list[MethodSpec]:
@@ -114,7 +113,11 @@ def build_runtime_specs(config: Mapping[str, Any] | None) -> dict[str, RuntimeSp
     }
 
 
-def build_executor(config: Mapping[str, Any] | None) -> RunExecutor:
+def build_executor(
+    config: Mapping[str, Any] | None,
+    *,
+    logger_config: Mapping[str, Any] | None = None,
+) -> RunExecutor:
     """Build a run executor from a small execution mapping."""
     config = config or {}
     name = str(config.get("executor", "sequential"))
@@ -122,25 +125,12 @@ def build_executor(config: Mapping[str, Any] | None) -> RunExecutor:
         return SequentialExecutor()
     if name == "ray":
         ray = dict(config.get("ray") or {})
+        worker_logging = bool(ray.get("worker_logging", False))
         return RayExecutor(
             address=ray.get("address"),
             init=bool(ray.get("init", True)),
             init_kwargs=dict(ray.get("init_kwargs", {})),
             propagate_uv_runtime_env=bool(ray.get("propagate_uv_runtime_env", False)),
+            worker_logger_config=dict(logger_config or {}) if worker_logging else None,
         )
     raise ValueError(f"unsupported executor {name!r}")
-
-
-def build_logger(config: Mapping[str, Any] | None) -> RunLogger | None:
-    """Build an optional run logger from a small logger mapping."""
-    config = config or {}
-    backend = config.get("backend", "none")
-    if backend in {None, "none"}:
-        return None
-    if backend == "mlflow":
-        return MLflowLogger(
-            experiment_name=config.get("experiment_name"),
-            tracking_uri=config.get("tracking_uri"),
-            artifact_subdir=config.get("artifact_subdir"),
-        )
-    raise ValueError(f"unsupported logger backend {backend!r}")

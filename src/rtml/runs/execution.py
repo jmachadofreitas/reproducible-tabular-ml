@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from contextlib import nullcontext
 from dataclasses import asdict, is_dataclass, replace
 from enum import Enum
 import hashlib
@@ -14,7 +15,7 @@ from typing import Any, Protocol
 from tqdm import tqdm
 
 from rtml.core.benchmarks import BenchmarkCase, BenchmarkSuite
-from rtml.loggers.base import RunLogger
+from rtml.loggers import Logger
 from rtml.methods.backends.base import BackendResult, MethodBackend
 from rtml.core.methods import MethodSpec
 from rtml.results.artifacts import save_prediction_set
@@ -46,6 +47,25 @@ def _backend_by_name(backends: Sequence[MethodBackend]) -> dict[str, MethodBacke
         backend_names = [backend.name for backend in backends]
         raise ValueError(f"method backend names must be unique: {backend_names}")
     return backend_by_name
+
+
+def _logger_run_context(
+    logger: Logger | None,
+    *,
+    case_name: str,
+    method_name: str,
+    resample_id: str,
+) -> Any:
+    if logger is None:
+        return nullcontext()
+    return logger.start_run(run_name=f"{case_name}/{method_name}/{resample_id}")
+
+
+def _with_metadata(result: RunResult, metadata: Mapping[str, Any] | None) -> RunResult:
+    if not metadata:
+        return result
+    merged = {**result.record.metadata, **dict(metadata)}
+    return replace(result, record=replace(result.record, metadata=merged))
 
 
 def _save_predictions(
@@ -192,7 +212,7 @@ def build_failed_run_record(
     )
 
 
-def run_method(
+def _run_method_in_context(
     *,
     case: BenchmarkCase,
     method: MethodSpec,
@@ -201,9 +221,9 @@ def run_method(
     seed: int = 0,
     runtime: RuntimeSpec | None = None,
     prediction_dir: str | Path | None = None,
-    logger: RunLogger | None = None,
+    logger: Logger | None = None,
+    metadata: Mapping[str, Any] | None = None,
 ) -> RunResult:
-    """Execute one complete method on one benchmark case/resample."""
     requested_backend = method.model.backend
     backend_by_name = _backend_by_name(backends)
     selected_backend = backend_by_name.get(requested_backend)
@@ -213,12 +233,7 @@ def run_method(
             f"no method backend named {requested_backend!r} "
             f"for method {method.name!r}; available backends: {available_backends}"
         )
-    if method.model.kind not in selected_backend.supported_model_kinds:
-        supported = ", ".join(sorted(selected_backend.supported_model_kinds)) or "<none>"
-        raise ValueError(
-            f"method backend {requested_backend!r} does not support model kind "
-            f"{method.model.kind!r}; supported model kinds: {supported}"
-        )
+    selected_backend.validate_method(method)
 
     # Backend execution owns fitting, predicting, and backend-level metrics.
     # Run execution owns stable IDs, artifact paths, and final logging.
@@ -228,6 +243,7 @@ def run_method(
         resample_id=resample_id,
         seed=seed,
         runtime=runtime,
+        logger=logger,
     )
     record = build_run_record(
         case=case,
@@ -246,9 +262,46 @@ def run_method(
     )
     if prediction_path is not None:
         record = replace(record, prediction_path=prediction_path)
+    result = _with_metadata(
+        RunResult(predictions=backend_result.predictions, record=record),
+        metadata,
+    )
     if logger is not None:
-        logger.log_run(record)
-    return RunResult(predictions=backend_result.predictions, record=record)
+        logger.log_run(result.record)
+    return result
+
+
+def run_method(
+    *,
+    case: BenchmarkCase,
+    method: MethodSpec,
+    backends: Sequence[MethodBackend],
+    resample_id: str | None = None,
+    seed: int = 0,
+    runtime: RuntimeSpec | None = None,
+    prediction_dir: str | Path | None = None,
+    logger: Logger | None = None,
+    metadata: Mapping[str, Any] | None = None,
+) -> RunResult:
+    """Execute one complete method on one benchmark case/resample."""
+    planned_resample_id = case.resampling.get_resample(resample_id).id
+    with _logger_run_context(
+        logger,
+        case_name=case.name,
+        method_name=method.name,
+        resample_id=planned_resample_id,
+    ):
+        return _run_method_in_context(
+            case=case,
+            method=method,
+            backends=backends,
+            resample_id=resample_id,
+            seed=seed,
+            runtime=runtime,
+            prediction_dir=prediction_dir,
+            logger=logger,
+            metadata=metadata,
+        )
 
 
 class RunExecutor(Protocol):
@@ -262,7 +315,7 @@ class RunExecutor(Protocol):
         *,
         backends: Sequence[MethodBackend],
         prediction_dir: str | Path | None = None,
-        logger: RunLogger | None = None,
+        logger: Logger | None = None,
         continue_on_error: bool = False,
         show_progress: bool = False,
     ) -> list[RunResult]:
@@ -270,11 +323,17 @@ class RunExecutor(Protocol):
         ...
 
 
-def _log_results(results: Sequence[RunResult], logger: RunLogger | None) -> None:
+def _log_results(results: Sequence[RunResult], logger: Logger | None) -> None:
     if logger is None:
         return
     for result in results:
-        logger.log_run(result.record)
+        with _logger_run_context(
+            logger,
+            case_name=result.record.case_name,
+            method_name=result.record.method.name,
+            resample_id=result.record.resample_id,
+        ):
+            logger.log_run(result.record)
 
 
 def _attach_plan_metadata(
@@ -308,33 +367,57 @@ def _execute_run_spec(
     *,
     backends: Sequence[MethodBackend],
     continue_on_error: bool,
+    logger: Logger | None = None,
+    metadata: Mapping[str, Any] | None = None,
 ) -> RunResult:
-    try:
-        return run_method(
-            case=run_spec.case,
-            method=run_spec.method,
-            backends=backends,
-            resample_id=run_spec.resample_id,
-            seed=run_spec.seed,
-            runtime=run_spec.runtime,
-            prediction_dir=prediction_dir,
-        )
-    except Exception as exc:
-        if not continue_on_error:
-            raise
-        # Failed specs still produce records so summaries can show the missing
-        # cells in a study instead of discarding all completed runs.
-        return RunResult(
-            predictions=None,
-            record=build_failed_run_record(
+    with _logger_run_context(
+        logger,
+        case_name=run_spec.case.name,
+        method_name=run_spec.method.name,
+        resample_id=run_spec.resample_id,
+    ):
+        try:
+            return _run_method_in_context(
                 case=run_spec.case,
                 method=run_spec.method,
+                backends=backends,
                 resample_id=run_spec.resample_id,
                 seed=run_spec.seed,
                 runtime=run_spec.runtime,
-                error=exc,
-            ),
-        )
+                prediction_dir=prediction_dir,
+                logger=logger,
+                metadata=metadata,
+            )
+        except Exception as exc:
+            if not continue_on_error:
+                raise
+            # Failed specs still produce records so summaries can show the
+            # missing cells in a study instead of discarding completed runs.
+            result = _with_metadata(
+                RunResult(
+                    predictions=None,
+                    record=build_failed_run_record(
+                        case=run_spec.case,
+                        method=run_spec.method,
+                        resample_id=run_spec.resample_id,
+                        seed=run_spec.seed,
+                        runtime=run_spec.runtime,
+                        error=exc,
+                    ),
+                ),
+                metadata,
+            )
+            if logger is not None:
+                logger.log_run(result.record)
+            return result
+
+
+def _execution_metadata(
+    *,
+    method: MethodSpec,
+    plan_metadata: Mapping[str, Any],
+) -> dict[str, Any]:
+    return {**method.metadata, **dict(plan_metadata)}
 
 
 class SequentialExecutor:
@@ -348,7 +431,7 @@ class SequentialExecutor:
         *,
         backends: Sequence[MethodBackend],
         prediction_dir: str | Path | None = None,
-        logger: RunLogger | None = None,
+        logger: Logger | None = None,
         continue_on_error: bool = False,
         show_progress: bool = False,
     ) -> list[RunResult]:
@@ -366,10 +449,13 @@ class SequentialExecutor:
                     prediction_dir,
                     backends=backends,
                     continue_on_error=continue_on_error,
+                    logger=logger,
+                    metadata=_execution_metadata(
+                        method=run_spec.method,
+                        plan_metadata=plan.metadata,
+                    ),
                 )
             )
-        results = _attach_plan_metadata(results, plan.metadata)
-        _log_results(results, logger)
         return results
 
 
@@ -385,11 +471,13 @@ class RayExecutor:
         init: bool = True,
         init_kwargs: Mapping[str, Any] | None = None,
         propagate_uv_runtime_env: bool = False,
+        worker_logger_config: Mapping[str, Any] | None = None,
     ) -> None:
         self.address = address
         self.init = init
         self.init_kwargs = dict(init_kwargs or {})
         self.propagate_uv_runtime_env = propagate_uv_runtime_env
+        self.worker_logger_config = self._active_worker_logger_config(worker_logger_config)
 
     def run(
         self,
@@ -397,7 +485,7 @@ class RayExecutor:
         *,
         backends: Sequence[MethodBackend],
         prediction_dir: str | Path | None = None,
-        logger: RunLogger | None = None,
+        logger: Logger | None = None,
         continue_on_error: bool = False,
         show_progress: bool = False,
     ) -> list[RunResult]:
@@ -419,6 +507,9 @@ class RayExecutor:
         remote_run = ray.remote(self._execute_run_spec_with_case)
         refs = []
         for run_spec in plan.runs:
+            # Logger instances can hold process-local run context, for example
+            # MLflow's active run. Pass plain logger config so workers can
+            # build one logger per RunSpec when worker logging is enabled.
             refs.append(
                 remote_run.options(**self._ray_options(run_spec.scheduler_resources)).remote(
                     case_refs[id(run_spec.case)],
@@ -429,6 +520,11 @@ class RayExecutor:
                     backends,
                     prediction_dir,
                     continue_on_error,
+                    self.worker_logger_config,
+                    _execution_metadata(
+                        method=run_spec.method,
+                        plan_metadata=plan.metadata,
+                    ),
                 )
             )
 
@@ -439,7 +535,8 @@ class RayExecutor:
             label=f"{plan.name} ({self.name})",
         )
         results = _attach_plan_metadata(raw_results, plan.metadata)
-        _log_results(results, logger)
+        if not self.worker_logger_config:
+            _log_results(results, logger)
         return results
 
     @staticmethod
@@ -474,6 +571,34 @@ class RayExecutor:
         return case_refs
 
     @staticmethod
+    def _active_worker_logger_config(
+        config: Mapping[str, Any] | None,
+    ) -> dict[str, Any]:
+        config = dict(config or {})
+        if config.get("backend", "none") in {None, "none"}:
+            return {}
+        if config.get("backend") == "mlflow":
+            config["tracking_uri"] = RayExecutor._absolute_mlflow_tracking_uri(
+                config.get("tracking_uri")
+            )
+        return config
+
+    @staticmethod
+    def _absolute_mlflow_tracking_uri(tracking_uri: Any) -> str:
+        from rtml.loggers.mlflow import DEFAULT_MLFLOW_TRACKING_URI
+
+        uri = str(tracking_uri or DEFAULT_MLFLOW_TRACKING_URI)
+        if not uri.startswith("sqlite:///"):
+            return uri
+        db_path = uri.removeprefix("sqlite:///")
+        if not db_path or db_path == ":memory:":
+            return uri
+        path = Path(db_path).expanduser()
+        if path.is_absolute():
+            return uri
+        return f"sqlite:///{path.resolve()}"
+
+    @staticmethod
     def _execute_run_spec_with_case(
         case: BenchmarkCase,
         method: MethodSpec,
@@ -483,7 +608,10 @@ class RayExecutor:
         backends: Sequence[MethodBackend],
         prediction_dir: str | Path | None,
         continue_on_error: bool,
+        worker_logger_config: Mapping[str, Any],
+        metadata: Mapping[str, Any],
     ) -> RunResult:
+        worker_logger = RayExecutor._build_worker_logger(worker_logger_config)
         return _execute_run_spec(
             RunSpec(
                 case=case,
@@ -495,7 +623,17 @@ class RayExecutor:
             prediction_dir,
             backends=backends,
             continue_on_error=continue_on_error,
+            logger=worker_logger,
+            metadata=metadata,
         )
+
+    @staticmethod
+    def _build_worker_logger(config: Mapping[str, Any]) -> Logger | None:
+        if not config:
+            return None
+        from rtml.loggers import build_logger
+
+        return build_logger(config)
 
     @staticmethod
     def _get_results(
@@ -542,7 +680,7 @@ def run_suite(
     runtime_specs: Mapping[str, RuntimeSpec] | None = None,
     scheduler_resources: Mapping[str, ExecutionResources] | None = None,
     prediction_dir: str | Path | None = None,
-    logger: RunLogger | None = None,
+    logger: Logger | None = None,
     plan_name: str | None = None,
     metadata: Mapping[str, Any] | None = None,
     continue_on_error: bool = False,
@@ -578,7 +716,7 @@ def run_study(
     runtime_specs: Mapping[str, RuntimeSpec] | None = None,
     scheduler_resources: Mapping[str, ExecutionResources] | None = None,
     prediction_dir: str | Path | None = None,
-    logger: RunLogger | None = None,
+    logger: Logger | None = None,
     metadata: Mapping[str, Any] | None = None,
     continue_on_error: bool = False,
     show_progress: bool = False,
@@ -606,7 +744,7 @@ def run_execution_plan_sequential(
     *,
     backends: Sequence[MethodBackend],
     prediction_dir: str | Path | None = None,
-    logger: RunLogger | None = None,
+    logger: Logger | None = None,
     continue_on_error: bool = False,
     show_progress: bool = False,
 ) -> list[RunResult]:
@@ -626,7 +764,7 @@ def run_execution_plan_ray(
     *,
     backends: Sequence[MethodBackend],
     prediction_dir: str | Path | None = None,
-    logger: RunLogger | None = None,
+    logger: Logger | None = None,
     continue_on_error: bool = False,
     show_progress: bool = False,
 ) -> list[RunResult]:

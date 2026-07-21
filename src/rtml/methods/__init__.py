@@ -1,1 +1,1 @@
-"""Method implementations, backends, and training engines."""
+"""Method backends, training and evaluation engines."""

@@ -1,4 +1,5 @@
-from rtml.loggers.base import RunLogger
-from rtml.loggers.mlflow import MLflowLogger
+from rtml.loggers.base import Logger, LogWriter
+from rtml.loggers.factory import build_logger
+from rtml.loggers.mlflow import MLflowWriter
 
-__all__ = ["MLflowLogger", "RunLogger"]
+__all__ = ["Logger", "LogWriter", "MLflowWriter", "build_logger"]

@@ -21,8 +21,8 @@ def _ensure_sqlite_parent(tracking_uri: str) -> None:
         Path(db_path).expanduser().parent.mkdir(parents=True, exist_ok=True)
 
 
-class MLflowLogger:
-    """MLflow adapter for RTML run records and artifacts."""
+class MLflowWriter:
+    """MLflow writer for RTML run records, metrics, and artifacts."""
 
     def __init__(
         self,
@@ -42,17 +42,21 @@ class MLflowLogger:
         experiment = self._mlflow.set_experiment(self.experiment_name)
         self._experiment_id = experiment.experiment_id
 
-    def log_running_metrics(
+    def start_run(self, *, run_name: str | None = None):
+        """Open one MLflow run context for a single RTML run."""
+        return self._mlflow.start_run(
+            run_name=run_name,
+            experiment_id=self._experiment_id,
+            nested=self._mlflow.active_run() is not None,
+        )
+
+    def log_metrics(
         self,
         metrics: Mapping[str, float],
         *,
         step: int | None = None,
     ) -> None:
         self._mlflow.log_metrics(dict(metrics), step=step)
-
-    def start_run(self, *, run_name: str | None = None):
-        """Open an MLflow run for streaming metrics before final RTML logging."""
-        return self._mlflow.start_run(run_name=run_name, experiment_id=self._experiment_id)
 
     def log_run(
         self,
@@ -73,6 +77,14 @@ class MLflowLogger:
             self._log_metrics(record)
             self._log_artifacts(record, artifact_paths)
             return active_run.info.run_id
+
+    def log_artifact(
+        self,
+        path: str | Path,
+        *,
+        artifact_path: str | None = None,
+    ) -> None:
+        self._mlflow.log_artifact(str(path), artifact_path=artifact_path)
 
     def _log_run_info(self, record: RunRecord) -> None:
         params: dict[str, str | int | float | bool] = {
@@ -148,7 +160,7 @@ class MLflowLogger:
         for key, value in values.items():
             name = f"{prefix}.{key}" if prefix else str(key)
             if isinstance(value, Mapping):
-                flattened.update(MLflowLogger._flatten_mapping(name, value))
+                flattened.update(MLflowWriter._flatten_mapping(name, value))
             else:
-                flattened[name] = MLflowLogger._clean_param_value(value)
+                flattened[name] = MLflowWriter._clean_param_value(value)
         return flattened

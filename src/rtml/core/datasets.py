@@ -247,13 +247,13 @@ class Dataset:
         if missing:
             raise ValueError(f"columns not present in dataset {self.name!r}: {missing}")
 
-    def row_ids_for(self, indices: Sequence[int]) -> np.ndarray:
+    def row_ids_for(self, indices: Sequence[int] | np.ndarray) -> np.ndarray:
         """Return stable row ids for selected positional row indices."""
         if self.row_id is not None:
             return self.data.iloc[list(indices)][self.row_id].to_numpy()
         return np.asarray(indices)
 
-    def select_rows(self, rows: Sequence[int] | slice) -> Dataset:
+    def select_rows(self, rows: Sequence[int] | np.ndarray | slice) -> Dataset:
         if isinstance(rows, slice):
             selected = self.data.iloc[rows]
         else:
