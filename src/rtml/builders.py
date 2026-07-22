@@ -99,6 +99,7 @@ def build_runtime_specs(config: Mapping[str, Any] | None) -> dict[str, RuntimeSp
         name: RuntimeSpec(
             python_version=runtime.get("python_version"),
             package_versions=dict(runtime.get("package_versions") or {}),
+            platform=runtime.get("platform"),
             device=runtime.get("device"),
             accelerator=runtime.get("accelerator"),
             precision=runtime.get("precision"),

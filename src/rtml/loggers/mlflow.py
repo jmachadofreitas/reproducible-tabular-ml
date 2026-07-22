@@ -93,11 +93,14 @@ class MLflowWriter:
             "dataset_fingerprint": record.dataset_fingerprint,
             "task_name": record.task_name,
             "task_type": record.task_type.value,
+            "task_fingerprint": record.task_fingerprint,
             "primary_metric": record.primary_metric or "",
             "resampling_plan_fingerprint": record.resampling_plan_fingerprint,
             "resample_id": record.resample_id,
             "method_name": record.method.name,
+            "method_fingerprint": record.method_fingerprint,
             "seed": record.seed,
+            "runtime_fingerprint": record.runtime_fingerprint,
         }
         params.update(self._flatten_mapping("transform", record.method.transform))
         params.update(self._flatten_mapping("model", asdict(record.method.model)))
@@ -112,6 +115,7 @@ class MLflowWriter:
             "rtml.dataset": record.dataset_name,
             "rtml.task": record.task_name,
             "rtml.method": record.method.name,
+            "rtml.method_fingerprint": record.method_fingerprint,
         }
         if "paradigm" in record.metadata:
             tags["rtml.paradigm"] = str(record.metadata["paradigm"])

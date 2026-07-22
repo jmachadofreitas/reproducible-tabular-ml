@@ -19,6 +19,13 @@ def _optional_array(value: np.ndarray | None) -> np.ndarray | None:
     return np.asarray(value)
 
 
+def _subgroup_array(value: np.ndarray) -> np.ndarray:
+    array = np.asarray(value)
+    if array.dtype == object:
+        return array.astype(str)
+    return array
+
+
 def save_prediction_set(predictions: PredictionSet, path: str | Path) -> Path:
     """Save one PredictionSet as a compressed local artifact."""
     artifact_path = Path(path)
@@ -30,6 +37,7 @@ def save_prediction_set(predictions: PredictionSet, path: str | Path) -> Path:
         "method_name": predictions.method_name,
         "resample_id": predictions.resample_id,
         "metadata": predictions.metadata,
+        "subgroups": list(predictions.subgroups),
         "present_fields": [
             field
             for field in _ARRAY_FIELDS
@@ -41,6 +49,12 @@ def save_prediction_set(predictions: PredictionSet, path: str | Path) -> Path:
         for field in _ARRAY_FIELDS
         if (array := _optional_array(getattr(predictions, field))) is not None
     }
+    arrays.update(
+        {
+            f"subgroup_{index}": _subgroup_array(values)
+            for index, values in enumerate(predictions.subgroups.values())
+        }
+    )
     np.savez_compressed(artifact_path, metadata_json=json.dumps(payload), **arrays)  # pyright: ignore[reportArgumentType]
     return artifact_path
 
@@ -51,6 +65,10 @@ def load_prediction_set(path: str | Path) -> PredictionSet:
     with np.load(artifact_path, allow_pickle=False) as data:
         payload = json.loads(str(data["metadata_json"]))
         arrays = {field: data[field].copy() for field in payload["present_fields"]}
+        subgroups = {
+            name: data[f"subgroup_{index}"].copy()
+            for index, name in enumerate(payload.get("subgroups", []))
+        }
 
     return PredictionSet(
         dataset_name=payload["dataset_name"],
@@ -63,6 +81,7 @@ def load_prediction_set(path: str | Path) -> PredictionSet:
         probabilities=arrays.get("probabilities"),
         scores=arrays.get("scores"),
         values=arrays.get("values"),
+        subgroups=subgroups,
         metadata=payload.get("metadata", {}),
     )
 

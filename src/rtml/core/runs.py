@@ -127,12 +127,15 @@ class RunRecord:
     dataset_fingerprint: str
     task_name: str
     task_type: TaskType
+    task_fingerprint: str
     primary_metric: str | None
     resampling_plan_fingerprint: str
     resample_id: str
     method: MethodSpec
+    method_fingerprint: str
     seed: int
     runtime: RuntimeSpec
+    runtime_fingerprint: str
     status: Literal["success", "failed"]
     metrics: dict[str, float] = field(default_factory=dict)
     fit_time: float | None = None

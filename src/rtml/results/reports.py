@@ -19,7 +19,11 @@ DEFAULT_AGGREGATE_GROUP_BY = (
     "task_name",
     "method_name",
 )
+DEFAULT_RANK_GROUP_BY = ("metadata.study_name", "case_name", "dataset_name", "task_name")
+DEFAULT_OVERALL_RANK_GROUP_BY = ("metadata.study_name",)
+DEFAULT_METHOD_FIELD = "method_name"
 DEFAULT_TIMING_FIELDS = ("fit_time", "predict_time")
+LOWER_IS_BETTER_METRICS = frozenset({"log_loss", "mse", "rmse", "mae"})
 
 
 def run_record_row(record: RunRecord) -> Row:
@@ -30,11 +34,16 @@ def run_record_row(record: RunRecord) -> Row:
         "dataset_name": record.dataset_name,
         "task_name": record.task_name,
         "task_type": record.task_type.value,
+        "dataset_fingerprint": record.dataset_fingerprint,
+        "task_fingerprint": record.task_fingerprint,
         "method_name": record.method.name,
+        "method_fingerprint": record.method_fingerprint,
         "model_kind": record.method.model.kind,
         "model_backend": record.method.model.backend,
         "resample_id": record.resample_id,
+        "resampling_plan_fingerprint": record.resampling_plan_fingerprint,
         "seed": record.seed,
+        "runtime_fingerprint": record.runtime_fingerprint,
         "status": record.status,
         "primary_metric": record.primary_metric or "",
         "fit_time": record.fit_time,
@@ -59,14 +68,28 @@ def save_run_summary(
     *,
     csv_path: str | Path | None = None,
     json_path: str | Path | None = None,
+    markdown_path: str | Path | None = None,
 ) -> list[Row]:
     """Save a lightweight run summary table and return the generated rows."""
     rows = run_results_table(results)
+    save_rows(rows, csv_path=csv_path, json_path=json_path, markdown_path=markdown_path)
+    return rows
+
+
+def save_rows(
+    rows: list[Row],
+    *,
+    csv_path: str | Path | None = None,
+    json_path: str | Path | None = None,
+    markdown_path: str | Path | None = None,
+) -> None:
+    """Save already prepared rows as CSV, JSON, and/or Markdown."""
     if csv_path is not None:
         _write_csv(rows, Path(csv_path))
     if json_path is not None:
         _write_json(rows, Path(json_path))
-    return rows
+    if markdown_path is not None:
+        _write_markdown(rows, Path(markdown_path))
 
 
 def load_run_summary(path: str | Path) -> list[Row]:
@@ -91,8 +114,14 @@ def aggregate_run_summary(
     *,
     group_by: tuple[str, ...] = DEFAULT_AGGREGATE_GROUP_BY,
     timing_fields: tuple[str, ...] = DEFAULT_TIMING_FIELDS,
+    include_factor_grouping: bool = False,
+    add_ranks: bool = True,
+    rank_group_by: tuple[str, ...] = DEFAULT_RANK_GROUP_BY,
+    overall_rank_group_by: tuple[str, ...] = DEFAULT_OVERALL_RANK_GROUP_BY,
+    method_field: str = DEFAULT_METHOD_FIELD,
 ) -> list[Row]:
     """Aggregate per-run summary rows into comparison-ready grouped rows."""
+    group_by = _with_factor_fields(rows, group_by) if include_factor_grouping else group_by
     groups: dict[tuple[Any, ...], list[Row]] = {}
     for row in rows:
         key = tuple(row.get(field, "") for field in group_by)
@@ -116,6 +145,13 @@ def aggregate_run_summary(
                 aggregate_row[f"{field}.{stat_name}"] = value
 
         aggregate_rows.append(aggregate_row)
+    if add_ranks:
+        _add_primary_metric_ranks(
+            aggregate_rows,
+            rank_group_by=rank_group_by,
+            overall_rank_group_by=overall_rank_group_by,
+            method_field=method_field,
+        )
     return aggregate_rows
 
 
@@ -124,19 +160,32 @@ def save_aggregate_summary(
     *,
     csv_path: str | Path | None = None,
     json_path: str | Path | None = None,
+    markdown_path: str | Path | None = None,
     group_by: tuple[str, ...] = DEFAULT_AGGREGATE_GROUP_BY,
     timing_fields: tuple[str, ...] = DEFAULT_TIMING_FIELDS,
+    include_factor_grouping: bool = False,
+    add_ranks: bool = True,
+    rank_group_by: tuple[str, ...] = DEFAULT_RANK_GROUP_BY,
+    overall_rank_group_by: tuple[str, ...] = DEFAULT_OVERALL_RANK_GROUP_BY,
+    method_field: str = DEFAULT_METHOD_FIELD,
 ) -> list[Row]:
     """Save grouped aggregate reports from a run summary table."""
     aggregate_rows = aggregate_run_summary(
         rows,
         group_by=group_by,
         timing_fields=timing_fields,
+        include_factor_grouping=include_factor_grouping,
+        add_ranks=add_ranks,
+        rank_group_by=rank_group_by,
+        overall_rank_group_by=overall_rank_group_by,
+        method_field=method_field,
     )
-    if csv_path is not None:
-        _write_csv(aggregate_rows, Path(csv_path))
-    if json_path is not None:
-        _write_json(aggregate_rows, Path(json_path))
+    save_rows(
+        aggregate_rows,
+        csv_path=csv_path,
+        json_path=json_path,
+        markdown_path=markdown_path,
+    )
     return aggregate_rows
 
 
@@ -154,6 +203,38 @@ def _write_json(rows: list[Row], path: Path) -> None:
     path.write_text(json.dumps(rows, indent=2), encoding="utf-8")
 
 
+def _write_markdown(rows: list[Row], path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fields = _row_fields(rows)
+    if not fields:
+        path.write_text("", encoding="utf-8")
+        return
+
+    lines = [
+        "| " + " | ".join(_markdown_cell(field) for field in fields) + " |",
+        "| " + " | ".join("---" for _ in fields) + " |",
+    ]
+    for row in rows:
+        lines.append(
+            "| "
+            + " | ".join(_markdown_cell(_format_markdown_value(row.get(field))) for field in fields)
+            + " |"
+        )
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _markdown_cell(value: object) -> str:
+    return str(value).replace("|", "\\|").replace("\n", " ")
+
+
+def _format_markdown_value(value: object) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, float):
+        return f"{value:.6g}"
+    return str(value)
+
+
 def _aggregate_value_fields(
     rows: list[Row],
     *,
@@ -163,6 +244,23 @@ def _aggregate_value_fields(
     for row in rows:
         for field in row:
             if (field.startswith("metric.") or field in timing_fields) and field not in fields:
+                fields.append(field)
+    return fields
+
+
+def _with_factor_fields(rows: list[Row], group_by: tuple[str, ...]) -> tuple[str, ...]:
+    fields = list(group_by)
+    for field in _factor_fields(rows):
+        if field not in fields:
+            fields.append(field)
+    return tuple(fields)
+
+
+def _factor_fields(rows: list[Row]) -> list[str]:
+    fields: list[str] = []
+    for row in rows:
+        for field in row:
+            if field.startswith("metadata.factor.") and field not in fields:
                 fields.append(field)
     return fields
 
@@ -216,6 +314,95 @@ def _copy_primary_metric_summary(
     aggregate_row["primary_metric_iqr"] = stats["iqr"]
 
 
+def _add_primary_metric_ranks(
+    rows: list[Row],
+    *,
+    rank_group_by: tuple[str, ...],
+    overall_rank_group_by: tuple[str, ...],
+    method_field: str,
+) -> None:
+    rank_groups: dict[tuple[Any, ...], list[Row]] = {}
+    for row in rows:
+        if row.get("primary_metric_name") and row.get("primary_metric_mean") is not None:
+            key = tuple(row.get(field, "") for field in rank_group_by)
+            rank_groups.setdefault(key, []).append(row)
+
+    for group_rows in rank_groups.values():
+        metric_name = _consistent_non_empty_value(group_rows, "primary_metric_name")
+        if metric_name is None:
+            continue
+        reverse = not _lower_is_better(str(metric_name))
+        ranked_rows = [
+            row for row in group_rows if _finite_number(row.get("primary_metric_mean")) is not None
+        ]
+        _assign_competition_ranks(
+            ranked_rows,
+            value_field="primary_metric_mean",
+            rank_field="primary_metric_rank_by_dataset",
+            reverse=reverse,
+        )
+
+    overall_groups: dict[tuple[Any, ...], list[Row]] = {}
+    for row in rows:
+        if row.get("primary_metric_rank_by_dataset") is not None:
+            key = tuple(row.get(field, "") for field in overall_rank_group_by)
+            overall_groups.setdefault(key, []).append(row)
+
+    for group_rows in overall_groups.values():
+        rank_by_method: dict[Any, list[float]] = {}
+        for row in group_rows:
+            method = row.get(method_field)
+            rank = _finite_number(row.get("primary_metric_rank_by_dataset"))
+            if method is not None and rank is not None:
+                rank_by_method.setdefault(method, []).append(rank)
+
+        method_rows: list[Row] = []
+        for method, ranks in rank_by_method.items():
+            mean_rank = sum(ranks) / len(ranks)
+            for row in group_rows:
+                if row.get(method_field) == method:
+                    row["primary_metric_mean_rank"] = mean_rank
+            method_rows.append({method_field: method, "primary_metric_mean_rank": mean_rank})
+
+        _assign_competition_ranks(
+            method_rows,
+            value_field="primary_metric_mean_rank",
+            rank_field="primary_metric_overall_rank",
+            reverse=False,
+        )
+        overall_rank_by_method = {
+            row[method_field]: row["primary_metric_overall_rank"] for row in method_rows
+        }
+        for row in group_rows:
+            method = row.get(method_field)
+            if method in overall_rank_by_method:
+                row["primary_metric_overall_rank"] = overall_rank_by_method[method]
+
+
+def _assign_competition_ranks(
+    rows: list[Row],
+    *,
+    value_field: str,
+    rank_field: str,
+    reverse: bool,
+) -> None:
+    rows.sort(key=lambda row: _finite_number(row.get(value_field)) or 0.0, reverse=reverse)
+    previous_value: float | None = None
+    previous_rank: int | None = None
+    for index, row in enumerate(rows, start=1):
+        value = _finite_number(row.get(value_field))
+        if value is None:
+            continue
+        rank = previous_rank if previous_value == value and previous_rank is not None else index
+        row[rank_field] = rank
+        previous_value = value
+        previous_rank = rank
+
+
+def _lower_is_better(metric_name: str) -> bool:
+    return metric_name in LOWER_IS_BETTER_METRICS
+
+
 def _metadata_fields(rows: list[Row]) -> list[str]:
     fields: list[str] = []
     for row in rows:
@@ -245,16 +432,22 @@ def _consistent_non_empty_value(rows: list[Row], field: str) -> Any | None:
 def _numeric_values(rows: list[Row], field: str) -> list[float]:
     values = []
     for row in rows:
-        value = row.get(field)
-        if value is None or value == "":
-            continue
-        try:
-            numeric = float(value)
-        except (TypeError, ValueError):
-            continue
-        if math.isfinite(numeric):
+        numeric = _finite_number(row.get(field))
+        if numeric is not None:
             values.append(numeric)
     return values
+
+
+def _finite_number(value: object) -> float | None:
+    if value is None or value == "":
+        return None
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    if math.isfinite(numeric):
+        return numeric
+    return None
 
 
 def _summary_stats(values: list[float]) -> dict[str, float | int | None]:

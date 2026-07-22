@@ -4,10 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from contextlib import nullcontext
-from dataclasses import asdict, is_dataclass, replace
-from enum import Enum
-import hashlib
-import json
+from dataclasses import replace
 import os
 from pathlib import Path
 from typing import Any, Protocol
@@ -15,30 +12,21 @@ from typing import Any, Protocol
 from tqdm import tqdm
 
 from rtml.core.benchmarks import BenchmarkCase, BenchmarkSuite
+from rtml.core.fingerprints import (
+    fingerprint_dataset,
+    fingerprint_method,
+    fingerprint_runtime,
+    fingerprint_task,
+    stable_fingerprint,
+)
 from rtml.loggers import Logger
 from rtml.methods.backends.base import BackendResult, MethodBackend
 from rtml.core.methods import MethodSpec
+from rtml.core.results import PredictionSet
 from rtml.results.artifacts import save_prediction_set
 from rtml.core.runs import ExecutionPlan, ExecutionResources, RunRecord, RunResult, RunSpec
-from rtml.core.runtime import RuntimeSpec
+from rtml.core.runtime import RuntimeSpec, capture_runtime
 from rtml.core.studies import Study
-from rtml.core.tasks import TaskSpec
-
-
-def _jsonable(value: Any) -> Any:
-    if is_dataclass(value) and not isinstance(value, type):
-        return _jsonable(asdict(value))
-    if isinstance(value, Enum):
-        return value.value
-    if isinstance(value, dict):
-        return {str(key): _jsonable(item) for key, item in value.items()}
-    if isinstance(value, list | tuple):
-        return [_jsonable(item) for item in value]
-    if isinstance(value, set):
-        return sorted(_jsonable(item) for item in value)
-    if value is None or isinstance(value, str | int | float | bool):
-        return value
-    return str(value)
 
 
 def _backend_by_name(backends: Sequence[MethodBackend]) -> dict[str, MethodBackend]:
@@ -72,60 +60,108 @@ def _save_predictions(
     *,
     case: BenchmarkCase,
     method: MethodSpec,
-    backend_result: BackendResult,
+    record: RunRecord,
+    predictions: PredictionSet,
     prediction_dir: str | Path | None,
     seed: int,
-    run_id: str,
 ) -> str | None:
     if prediction_dir is None:
         return None
-    run_digest = run_id.rsplit(":", maxsplit=1)[-1]
+    run_digest = record.run_id.rsplit(":", maxsplit=1)[-1]
     # Include the run digest so distinct method specs with the same display name
     # cannot overwrite each other.
     return str(
         save_prediction_set(
-            backend_result.predictions,
+            _with_prediction_evidence(predictions, record),
             Path(prediction_dir)
             / case.dataset.name
             / case.task.name
             / method.name
-            / backend_result.predictions.resample_id
+            / record.resample_id
             / f"seed_{seed}_{run_digest}.npz",
         )
     )
+
+
+def _subgroup_columns(case: BenchmarkCase, configured_columns: Sequence[str] | None) -> list[str]:
+    if configured_columns is None:
+        return []
+    columns: list[str] = []
+    for column in (*case.task.groups, *case.task.sensitive_attributes, *configured_columns):
+        if column not in columns:
+            columns.append(column)
+    case.dataset.require_columns(columns)
+    return columns
+
+
+def _subgroup_values(
+    *,
+    case: BenchmarkCase,
+    resample_id: str,
+    columns: Sequence[str] | None,
+) -> dict[str, Any]:
+    selected_columns = _subgroup_columns(case, columns)
+    if not selected_columns:
+        return {}
+    test_idx = case.resampling.get_resample(resample_id).test_idx
+    data = case.dataset.data.iloc[test_idx]
+    return {
+        column: data[column].astype("string").fillna("<NA>").to_numpy(dtype=str)
+        for column in selected_columns
+    }
+
+
+def _with_prediction_evidence(predictions: PredictionSet, record: RunRecord) -> PredictionSet:
+    return replace(
+        predictions,
+        subgroups={**dict(predictions.subgroups or {})},
+        metadata={
+            **dict(predictions.metadata or {}),
+            **prediction_evidence_metadata(record),
+        },
+    )
+
+
+def prediction_evidence_metadata(record: RunRecord) -> dict[str, Any]:
+    """Return run evidence metadata that should travel with saved predictions."""
+    return {
+        "run_id": record.run_id,
+        "case_name": record.case_name,
+        "dataset_fingerprint": record.dataset_fingerprint,
+        "task_fingerprint": record.task_fingerprint,
+        "resampling_plan_fingerprint": record.resampling_plan_fingerprint,
+        "method_fingerprint": record.method_fingerprint,
+        "runtime_fingerprint": record.runtime_fingerprint,
+        "seed": record.seed,
+    }
 
 
 def build_run_id(
     *,
     case_name: str,
     dataset_fingerprint: str,
-    task: TaskSpec,
+    task_fingerprint: str,
     resampling_plan_fingerprint: str,
     resample_id: str,
-    method: MethodSpec,
+    method_name: str,
+    method_fingerprint: str,
     seed: int,
-    runtime: RuntimeSpec | None = None,
+    runtime_fingerprint: str,
 ) -> str:
     """Build a stable run id from planned inputs."""
     payload = {
         "case_name": case_name,
         "dataset_fingerprint": dataset_fingerprint,
-        "task": task,
+        "task_fingerprint": task_fingerprint,
         "resampling_plan_fingerprint": resampling_plan_fingerprint,
         "resample_id": resample_id,
-        "method": {
-            "name": method.name,
-            "transform": method.transform,
-            "model": method.model,
-            "training": method.training,
-        },
+        "method_name": method_name,
+        "method_fingerprint": method_fingerprint,
         "seed": seed,
-        "runtime": runtime,
+        "runtime_fingerprint": runtime_fingerprint,
     }
-    digest = hashlib.sha256(
-        json.dumps(_jsonable(payload), sort_keys=True, separators=(",", ":")).encode("utf-8")
-    ).hexdigest()[:16]
-    return f"{case_name}:{method.name}:{resample_id}:{seed}:sha256:{digest}"
+    digest = stable_fingerprint(payload).removeprefix("sha256:")[:16]
+    return f"{case_name}:{method_name}:{resample_id}:{seed}:sha256:{digest}"
 
 
 def build_run_record(
@@ -138,31 +174,42 @@ def build_run_record(
     prediction_path: str | None = None,
 ) -> RunRecord:
 
+    observed_runtime = runtime or capture_runtime()
     resample_id = backend_result.predictions.resample_id
-    dataset_fingerprint = str(case.dataset.metadata.get("fingerprint", case.dataset.name))
+    dataset_fingerprint = fingerprint_dataset(case.dataset)
+    task_fingerprint = fingerprint_task(case.task)
     resampling_fingerprint = case.resampling.fingerprint or ""
+    method_fingerprint = fingerprint_method(method)
+    runtime_fingerprint = fingerprint_runtime(observed_runtime)
+    run_id_runtime_fingerprint = (
+        fingerprint_runtime(runtime) if runtime is not None else stable_fingerprint(None)
+    )
     return RunRecord(
         run_id=build_run_id(
             case_name=case.name,
             dataset_fingerprint=dataset_fingerprint,
-            task=case.task,
+            task_fingerprint=task_fingerprint,
             resampling_plan_fingerprint=resampling_fingerprint,
             resample_id=resample_id,
-            method=method,
+            method_name=method.name,
+            method_fingerprint=method_fingerprint,
             seed=seed,
-            runtime=runtime,
+            runtime_fingerprint=run_id_runtime_fingerprint,
         ),
         case_name=case.name,
         dataset_name=case.dataset.name,
         dataset_fingerprint=dataset_fingerprint,
         task_name=case.task.name,
         task_type=case.task.task_type,
+        task_fingerprint=task_fingerprint,
         primary_metric=case.task.primary_metric,
         resampling_plan_fingerprint=resampling_fingerprint,
         resample_id=resample_id,
         method=method,
+        method_fingerprint=method_fingerprint,
         seed=seed,
-        runtime=runtime or RuntimeSpec(),
+        runtime=observed_runtime,
+        runtime_fingerprint=runtime_fingerprint,
         status="success",
         metrics=backend_result.metrics,
         fit_time=backend_result.fit_time,
@@ -181,31 +228,42 @@ def build_failed_run_record(
     runtime: RuntimeSpec | None = None,
     error: Exception,
 ) -> RunRecord:
-    dataset_fingerprint = str(case.dataset.metadata.get("fingerprint", case.dataset.name))
+    observed_runtime = runtime or capture_runtime()
+    dataset_fingerprint = fingerprint_dataset(case.dataset)
+    task_fingerprint = fingerprint_task(case.task)
     resampling_fingerprint = case.resampling.fingerprint or ""
+    method_fingerprint = fingerprint_method(method)
+    runtime_fingerprint = fingerprint_runtime(observed_runtime)
+    run_id_runtime_fingerprint = (
+        fingerprint_runtime(runtime) if runtime is not None else stable_fingerprint(None)
+    )
     error_message = str(error) or repr(error)
     return RunRecord(
         run_id=build_run_id(
             case_name=case.name,
             dataset_fingerprint=dataset_fingerprint,
-            task=case.task,
+            task_fingerprint=task_fingerprint,
             resampling_plan_fingerprint=resampling_fingerprint,
             resample_id=resample_id,
-            method=method,
+            method_name=method.name,
+            method_fingerprint=method_fingerprint,
             seed=seed,
-            runtime=runtime,
+            runtime_fingerprint=run_id_runtime_fingerprint,
         ),
         case_name=case.name,
         dataset_name=case.dataset.name,
         dataset_fingerprint=dataset_fingerprint,
         task_name=case.task.name,
         task_type=case.task.task_type,
+        task_fingerprint=task_fingerprint,
         primary_metric=case.task.primary_metric,
         resampling_plan_fingerprint=resampling_fingerprint,
         resample_id=resample_id,
         method=method,
+        method_fingerprint=method_fingerprint,
         seed=seed,
-        runtime=runtime or RuntimeSpec(),
+        runtime=observed_runtime,
+        runtime_fingerprint=runtime_fingerprint,
         status="failed",
         error=error_message,
         metadata={"error_type": type(error).__name__},
@@ -223,6 +281,7 @@ def _run_method_in_context(
     prediction_dir: str | Path | None = None,
     logger: Logger | None = None,
     metadata: Mapping[str, Any] | None = None,
+    subgroup_columns: Sequence[str] | None = None,
 ) -> RunResult:
     requested_backend = method.model.backend
     backend_by_name = _backend_by_name(backends)
@@ -252,20 +311,35 @@ def _run_method_in_context(
         seed=seed,
         runtime=runtime,
     )
-    prediction_path = _save_predictions(
-        case=case,
-        method=method,
-        backend_result=backend_result,
-        prediction_dir=prediction_dir,
-        seed=seed,
-        run_id=record.run_id,
-    )
-    if prediction_path is not None:
-        record = replace(record, prediction_path=prediction_path)
     result = _with_metadata(
         RunResult(predictions=backend_result.predictions, record=record),
         metadata,
     )
+    enriched_predictions = replace(
+        _with_prediction_evidence(backend_result.predictions, result.record),
+        subgroups={
+            **dict(backend_result.predictions.subgroups or {}),
+            **_subgroup_values(
+                case=case,
+                resample_id=result.record.resample_id,
+                columns=subgroup_columns,
+            ),
+        },
+    )
+    result = replace(result, predictions=enriched_predictions)
+    prediction_path = _save_predictions(
+        case=case,
+        method=method,
+        record=result.record,
+        predictions=enriched_predictions,
+        prediction_dir=prediction_dir,
+        seed=seed,
+    )
+    if prediction_path is not None:
+        result = replace(
+            result,
+            record=replace(result.record, prediction_path=prediction_path),
+        )
     if logger is not None:
         logger.log_run(result.record)
     return result
@@ -282,6 +356,7 @@ def run_method(
     prediction_dir: str | Path | None = None,
     logger: Logger | None = None,
     metadata: Mapping[str, Any] | None = None,
+    subgroup_columns: Sequence[str] | None = None,
 ) -> RunResult:
     """Execute one complete method on one benchmark case/resample."""
     planned_resample_id = case.resampling.get_resample(resample_id).id
@@ -301,6 +376,7 @@ def run_method(
             prediction_dir=prediction_dir,
             logger=logger,
             metadata=metadata,
+            subgroup_columns=subgroup_columns,
         )
 
 
@@ -318,6 +394,7 @@ class RunExecutor(Protocol):
         logger: Logger | None = None,
         continue_on_error: bool = False,
         show_progress: bool = False,
+        subgroup_columns: Sequence[str] | None = None,
     ) -> list[RunResult]:
         """Run every `RunSpec` in the plan and return RTML-native results."""
         ...
@@ -369,6 +446,7 @@ def _execute_run_spec(
     continue_on_error: bool,
     logger: Logger | None = None,
     metadata: Mapping[str, Any] | None = None,
+    subgroup_columns: Sequence[str] | None = None,
 ) -> RunResult:
     with _logger_run_context(
         logger,
@@ -387,6 +465,7 @@ def _execute_run_spec(
                 prediction_dir=prediction_dir,
                 logger=logger,
                 metadata=metadata,
+                subgroup_columns=subgroup_columns,
             )
         except Exception as exc:
             if not continue_on_error:
@@ -434,6 +513,7 @@ class SequentialExecutor:
         logger: Logger | None = None,
         continue_on_error: bool = False,
         show_progress: bool = False,
+        subgroup_columns: Sequence[str] | None = None,
     ) -> list[RunResult]:
         results = []
         for run_spec in tqdm(
@@ -454,6 +534,7 @@ class SequentialExecutor:
                         method=run_spec.method,
                         plan_metadata=plan.metadata,
                     ),
+                    subgroup_columns=subgroup_columns,
                 )
             )
         return results
@@ -488,6 +569,7 @@ class RayExecutor:
         logger: Logger | None = None,
         continue_on_error: bool = False,
         show_progress: bool = False,
+        subgroup_columns: Sequence[str] | None = None,
     ) -> list[RunResult]:
         try:
             import ray
@@ -525,6 +607,7 @@ class RayExecutor:
                         method=run_spec.method,
                         plan_metadata=plan.metadata,
                     ),
+                    subgroup_columns,
                 )
             )
 
@@ -610,6 +693,7 @@ class RayExecutor:
         continue_on_error: bool,
         worker_logger_config: Mapping[str, Any],
         metadata: Mapping[str, Any],
+        subgroup_columns: Sequence[str] | None,
     ) -> RunResult:
         worker_logger = RayExecutor._build_worker_logger(worker_logger_config)
         return _execute_run_spec(
@@ -625,6 +709,7 @@ class RayExecutor:
             continue_on_error=continue_on_error,
             logger=worker_logger,
             metadata=metadata,
+            subgroup_columns=subgroup_columns,
         )
 
     @staticmethod
@@ -685,6 +770,7 @@ def run_suite(
     metadata: Mapping[str, Any] | None = None,
     continue_on_error: bool = False,
     show_progress: bool = False,
+    subgroup_columns: Sequence[str] | None = None,
 ) -> list[RunResult]:
     """Execute a suite by wrapping it in a default comparison study."""
     study = Study.from_suite(
@@ -704,6 +790,7 @@ def run_suite(
         metadata=metadata,
         continue_on_error=continue_on_error,
         show_progress=show_progress,
+        subgroup_columns=subgroup_columns,
     )
 
 
@@ -720,6 +807,7 @@ def run_study(
     metadata: Mapping[str, Any] | None = None,
     continue_on_error: bool = False,
     show_progress: bool = False,
+    subgroup_columns: Sequence[str] | None = None,
 ) -> list[RunResult]:
     """Expand a study into an execution plan and execute it."""
     plan = ExecutionPlan.from_study(
@@ -736,6 +824,7 @@ def run_study(
         logger=logger,
         continue_on_error=continue_on_error,
         show_progress=show_progress,
+        subgroup_columns=subgroup_columns,
     )
 
 
@@ -747,6 +836,7 @@ def run_execution_plan_sequential(
     logger: Logger | None = None,
     continue_on_error: bool = False,
     show_progress: bool = False,
+    subgroup_columns: Sequence[str] | None = None,
 ) -> list[RunResult]:
     """Execute an execution plan in-process."""
     return SequentialExecutor().run(
@@ -756,6 +846,7 @@ def run_execution_plan_sequential(
         logger=logger,
         continue_on_error=continue_on_error,
         show_progress=show_progress,
+        subgroup_columns=subgroup_columns,
     )
 
 
@@ -767,6 +858,7 @@ def run_execution_plan_ray(
     logger: Logger | None = None,
     continue_on_error: bool = False,
     show_progress: bool = False,
+    subgroup_columns: Sequence[str] | None = None,
 ) -> list[RunResult]:
     """Execute an execution plan with Ray, using each `RunSpec`'s resource hints."""
     return RayExecutor().run(
@@ -776,4 +868,5 @@ def run_execution_plan_ray(
         logger=logger,
         continue_on_error=continue_on_error,
         show_progress=show_progress,
+        subgroup_columns=subgroup_columns,
     )

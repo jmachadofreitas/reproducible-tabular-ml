@@ -23,4 +23,5 @@ class PredictionSet:
     scores: np.ndarray | None = None
     values: np.ndarray | None = None
 
+    subgroups: dict[str, np.ndarray] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
