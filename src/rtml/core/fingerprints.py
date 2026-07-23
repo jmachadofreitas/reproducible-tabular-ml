@@ -80,7 +80,7 @@ def fingerprint_method(method: Any) -> str:
             "name": method.name,
             "transform": method.transform,
             "model": method.model,
-            "training": method.training,
+            "fit": method.fit,
         }
     )
 

@@ -28,7 +28,7 @@ def build_methods(config: Sequence[Mapping[str, Any]] | None) -> list[MethodSpec
                     backend=str(model["backend"]),
                     params=dict(model.get("params") or {}),
                 ),
-                training=dict(method.get("training") or {}),
+                fit=dict(method.get("fit") or {}),
                 metadata=dict(method.get("metadata") or {}),
             )
         )

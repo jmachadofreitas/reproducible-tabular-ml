@@ -104,7 +104,7 @@ class MLflowWriter:
         }
         params.update(self._flatten_mapping("transform", record.method.transform))
         params.update(self._flatten_mapping("model", asdict(record.method.model)))
-        params.update(self._flatten_mapping("training", record.method.training))
+        params.update(self._flatten_mapping("fit", record.method.fit))
         params.update(self._flatten_mapping("runtime", asdict(record.runtime)))
         params.update(self._flatten_mapping("metadata", record.metadata))
         self._mlflow.log_params(params)
