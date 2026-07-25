@@ -7,6 +7,7 @@ license = { file = "LICENSE" }
 dependencies = [
     "torch",
     "pytorch-ignite",
+    "tabm==0.0.3",
     "scikit-learn",
     "openml",
     "hydra-core",
