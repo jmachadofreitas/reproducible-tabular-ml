@@ -17,7 +17,7 @@ from rtml.core.metrics import compute_metrics
 from rtml.core.resampling import Resample
 from rtml.core.results import PredictionSet
 from rtml.core.runtime import RuntimeSpec
-from rtml.core.tasks import TaskType
+from rtml.core.tasks import TaskSpec, TaskType
 from rtml.loggers import Logger
 from rtml.methods.backends.base import BackendResult, MethodBackend
 from rtml.methods.engines import (
@@ -46,8 +46,8 @@ from rtml.single_instance.methods._torch.common.task_adapters import (
     resolve_score_name,
 )
 from rtml.single_instance.methods._torch.mlp.factory import build_mlp_bundle
+from rtml.single_instance.methods._torch.tabm.factory import build_tabm_bundle
 from rtml.single_instance.preprocessing import build_preprocessor
-from rtml.core.tasks import TaskSpec
 
 
 class TorchModelBuilder(Protocol):
@@ -71,6 +71,7 @@ class TorchBackend(MethodBackend):
     name = "torch"
     DEFAULT_MODEL_BUILDERS: Mapping[str, TorchModelBuilder] = {
         "simple_mlp": build_mlp_bundle,
+        "tabm": build_tabm_bundle,
     }
 
     def __init__(
