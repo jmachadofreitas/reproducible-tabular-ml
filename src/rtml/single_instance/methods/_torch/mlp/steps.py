@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
 from typing import Any
 
 import torch
@@ -12,25 +11,6 @@ from rtml.single_instance.methods._torch.common.task_adapters import (
     make_prediction_formatter,
     make_target_preparer,
 )
-
-Batch = Any
-
-
-def unpack_batch(batch: Batch) -> tuple[torch.Tensor, torch.Tensor]:
-    """Support tuple batches and simple mapping batches in the same model code."""
-    if isinstance(batch, Mapping):
-        x = batch.get("x")
-        y = batch.get("y")
-        if isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
-            return x, y
-        raise TypeError("mapping batches must provide tensor values for 'x' and 'y'")
-
-    if isinstance(batch, (tuple, list)) and len(batch) == 2:
-        x, y = batch
-        if isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
-            return x, y
-
-    raise TypeError("dense tabular MLP batches must be (x, y) or {'x': x, 'y': y}")
 
 
 def create_training_step(
@@ -44,11 +24,11 @@ def create_training_step(
     prepare_target = make_target_preparer(task)
     format_predictions = make_prediction_formatter(task)
 
-    def training_step(batch: Batch) -> dict[str, Any]:
+    def training_step(batch: Any) -> dict[str, Any]:
         model.train()
         optimizer.zero_grad()
 
-        x, y = unpack_batch(batch)
+        x, y = batch
         y_target = prepare_target(y)
         logits = model(x.float())
         loss = loss_fn(logits, y_target)
@@ -73,10 +53,10 @@ def create_evaluation_step(
     prepare_target = make_target_preparer(task)
     format_predictions = make_prediction_formatter(task)
 
-    def evaluation_step(batch: Batch) -> dict[str, torch.Tensor]:
+    def evaluation_step(batch: Any) -> dict[str, torch.Tensor]:
         model.eval()
         with torch.inference_mode():
-            x, y = unpack_batch(batch)
+            x, y = batch
             y_target = prepare_target(y)
             logits = model(x.float())
             output = format_predictions(logits, y_target)
