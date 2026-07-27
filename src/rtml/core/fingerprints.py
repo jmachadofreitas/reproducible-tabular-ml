@@ -52,20 +52,7 @@ def fingerprint_dataset(dataset: Any) -> str:
     existing = getattr(dataset, "metadata", {}).get("fingerprint")
     if existing:
         return str(existing)
-    data = getattr(dataset, "data")
-    payload = {
-        "name": dataset.name,
-        "shape": tuple(data.shape),
-        "columns": [str(column) for column in data.columns],
-        "schema": dataset.schema,
-        "row_id": dataset.row_id,
-        "metadata": {
-            key: value
-            for key, value in dict(dataset.metadata).items()
-            if key != "fingerprint"
-        },
-    }
-    return stable_fingerprint(payload)
+    return stable_fingerprint(dataset.fingerprint_payload())
 
 
 def fingerprint_task(task: Any) -> str:

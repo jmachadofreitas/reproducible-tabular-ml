@@ -23,7 +23,7 @@ def test_compute_metrics_uses_prediction_set_without_backend_objects() -> None:
         task_name="binary",
         method_name="any_backend",
         resample_id="fold_00",
-        row_ids=[0, 1, 2, 3],
+        sample_ids=[0, 1, 2, 3],
         y_true=[0, 1, 1, 0],
         labels=[0, 1, 0, 0],
         probabilities=[
@@ -50,7 +50,7 @@ def test_regression_metrics_have_expected_values() -> None:
         task_name="regression",
         method_name="any_backend",
         resample_id="fold_00",
-        row_ids=[0, 1, 2],
+        sample_ids=[0, 1, 2],
         y_true=[1.0, 2.0, 4.0],
         values=[1.0, 4.0, 7.0],
     )

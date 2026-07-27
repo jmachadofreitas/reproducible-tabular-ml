@@ -90,7 +90,6 @@ def _subgroup_columns(case: BenchmarkCase, configured_columns: Sequence[str] | N
     for column in (*case.task.groups, *case.task.sensitive_attributes, *configured_columns):
         if column not in columns:
             columns.append(column)
-    case.dataset.require_columns(columns)
     return columns
 
 
@@ -104,11 +103,7 @@ def _subgroup_values(
     if not selected_columns:
         return {}
     test_idx = case.resampling.get_resample(resample_id).test_idx
-    data = case.dataset.data.iloc[test_idx]
-    return {
-        column: data[column].astype("string").fillna("<NA>").to_numpy(dtype=str)
-        for column in selected_columns
-    }
+    return case.dataset.subgroup_values(selected_columns, test_idx)
 
 
 def _with_prediction_evidence(predictions: PredictionSet, record: RunRecord) -> PredictionSet:

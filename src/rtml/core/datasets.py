@@ -247,11 +247,38 @@ class Dataset:
         if missing:
             raise ValueError(f"columns not present in dataset {self.name!r}: {missing}")
 
-    def row_ids_for(self, indices: Sequence[int] | np.ndarray) -> np.ndarray:
-        """Return stable row ids for selected positional row indices."""
+    def sample_ids_for(self, indices: Sequence[int] | np.ndarray) -> np.ndarray:
+        """Return stable sample ids for selected positional row indices."""
         if self.row_id is not None:
             return self.data.iloc[list(indices)][self.row_id].to_numpy()
         return np.asarray(indices)
+
+    def subgroup_values(
+        self,
+        columns: Iterable[str],
+        indices: Sequence[int] | np.ndarray,
+    ) -> dict[str, np.ndarray]:
+        """Return subgroup columns aligned with selected samples."""
+        selected_columns = list(columns)
+        self.require_columns(selected_columns)
+        data = self.data.iloc[list(indices)]
+        return {
+            column: data[column].astype("string").fillna("<NA>").to_numpy(dtype=str)
+            for column in selected_columns
+        }
+
+    def fingerprint_payload(self) -> dict[str, Any]:
+        """Return the dataset structure and provenance used for its fingerprint."""
+        return {
+            "name": self.name,
+            "shape": tuple(self.data.shape),
+            "columns": [str(column) for column in self.data.columns],
+            "schema": self.schema,
+            "row_id": self.row_id,
+            "metadata": {
+                key: value for key, value in self.metadata.items() if key != "fingerprint"
+            },
+        }
 
     def select_rows(self, rows: Sequence[int] | np.ndarray | slice) -> Dataset:
         if isinstance(rows, slice):

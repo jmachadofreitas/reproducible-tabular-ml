@@ -1,16 +1,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import Any, Generic, TypeVar
 
-if TYPE_CHECKING:
-    from rtml.core.datasets import Dataset
-    from rtml.core.resampling import ResamplingPlan
-    from rtml.core.tasks import TaskSpec
+from rtml.core.resampling import ResamplingPlan
+
+DatasetT = TypeVar("DatasetT")
+TaskT = TypeVar("TaskT")
 
 
 @dataclass
-class BenchmarkCase:
+class BenchmarkCase(Generic[DatasetT, TaskT]):
     """Defines a benchmark case
 
     Combines the dataset, task specification, and resampling plan
@@ -18,8 +18,8 @@ class BenchmarkCase:
     """
 
     name: str
-    dataset: Dataset
-    task: TaskSpec
+    dataset: DatasetT
+    task: TaskT
     resampling: ResamplingPlan
     metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -30,11 +30,11 @@ class BenchmarkCase:
 
 
 @dataclass
-class BenchmarkSuite:
+class BenchmarkSuite(Generic[DatasetT, TaskT]):
     """A collection of benchmark tasks."""
 
     name: str
-    cases: list[BenchmarkCase]
+    cases: list[BenchmarkCase[DatasetT, TaskT]]
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:

@@ -10,7 +10,7 @@ import numpy as np
 from rtml.core.results import PredictionSet
 from rtml.core.metrics import MetricRequest, compute_metrics
 
-_ARRAY_FIELDS = ("row_ids", "y_true", "labels", "probabilities", "scores", "values")
+_ARRAY_FIELDS = ("sample_ids", "y_true", "labels", "probabilities", "scores", "values")
 
 
 def _optional_array(value: np.ndarray | None) -> np.ndarray | None:
@@ -75,7 +75,7 @@ def load_prediction_set(path: str | Path) -> PredictionSet:
         task_name=payload["task_name"],
         method_name=payload["method_name"],
         resample_id=payload["resample_id"],
-        row_ids=arrays["row_ids"],
+        sample_ids=arrays["sample_ids"],
         y_true=arrays.get("y_true"),
         labels=arrays.get("labels"),
         probabilities=arrays.get("probabilities"),

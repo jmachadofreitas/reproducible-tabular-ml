@@ -161,7 +161,7 @@ def _compute_metric_quietly(metric: MetricRequest, predictions: PredictionSet) -
 def _subset_predictions(predictions: PredictionSet, mask: np.ndarray) -> PredictionSet:
     return replace(
         predictions,
-        row_ids=predictions.row_ids[mask],
+        sample_ids=predictions.sample_ids[mask],
         y_true=None if predictions.y_true is None else predictions.y_true[mask],
         labels=None if predictions.labels is None else predictions.labels[mask],
         probabilities=None
