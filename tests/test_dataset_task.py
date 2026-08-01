@@ -238,6 +238,32 @@ def test_sklearn_benchmark_case_builder_materializes_resampling_plan() -> None:
     assert len(benchmark_case.resampling.resamples) == 3
 
 
+def test_sklearn_resampling_uses_row_positions() -> None:
+    dataset, task = load_breast_cancer_dataset()
+    dataset.data.index = np.arange(1000, 1000 + len(dataset))
+    spec = ResamplingSpec(
+        name="breast_cancer_holdout",
+        strategy=ResamplingStrategy.STRATIFIED_HOLDOUT,
+        test_size=0.2,
+        stratify="target",
+        shuffle=True,
+        seed=7,
+    )
+
+    case = build_sklearn_benchmark_case(
+        name="breast_cancer_case",
+        dataset=dataset,
+        task=task,
+        resampling_spec=spec,
+    )
+    resample = case.resampling.resamples[0]
+
+    assert max(resample.train_idx) < len(dataset)
+    assert max(resample.test_idx) < len(dataset)
+    assert set(resample.train_idx).isdisjoint(resample.test_idx)
+    assert set(resample.train_idx).union(resample.test_idx) == set(range(len(dataset)))
+
+
 def test_sklearn_benchmark_suite_builder_collects_cases() -> None:
     dataset, task = load_diabetes_dataset()
     spec = build_sklearn_resampling_spec(
@@ -254,7 +280,10 @@ def test_sklearn_benchmark_suite_builder_collects_cases() -> None:
         resampling_spec=spec,
     )
 
-    suite = build_sklearn_benchmark_suite(name="local_sklearn_suite", cases=[benchmark_case])
+    suite = build_sklearn_benchmark_suite(
+        name="local_sklearn_suite",
+        cases=[benchmark_case],
+    )
 
     assert suite.name == "local_sklearn_suite"
     assert suite.cases == [benchmark_case]
@@ -267,6 +296,9 @@ def test_load_sklearn_classification_suite_builds_default_suite() -> None:
     assert [case.dataset.name for case in suite.cases] == ["breast_cancer", "iris", "wine"]
     assert all(
         case.resampling.spec.strategy == ResamplingStrategy.STRATIFIED_KFOLD for case in suite.cases
+    )
+    assert all(
+        resample.valid_idx is None for case in suite.cases for resample in case.resampling.resamples
     )
 
 
@@ -287,6 +319,9 @@ def test_load_sklearn_regression_suite_builds_default_suite() -> None:
         "s_curve_noisy",
     ]
     assert all(case.task.task_type == TaskType.REGRESSION for case in suite.cases)
+    assert all(
+        resample.valid_idx is None for case in suite.cases for resample in case.resampling.resamples
+    )
     assert all(case.task.primary_metric == "rmse" for case in suite.cases)
     assert all(case.resampling.spec.strategy == ResamplingStrategy.KFOLD for case in suite.cases)
     assert all(len(case.resampling.resamples) == 5 for case in suite.cases)
