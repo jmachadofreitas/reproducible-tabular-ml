@@ -7,8 +7,8 @@ import torch
 from torch import nn
 
 from rtml.core.tasks import TaskSpec, TaskType
-from rtml.methods.engines import EvaluationStep, TrainingStep
-from rtml.single_instance.methods._torch.common.task_adapters import make_target_preparer
+from rtml.methods.engines.core import EvaluationStep, TrainingStep
+from rtml.methods.engines.task_adapters import make_target_preparer
 
 MemberLoss = Callable[[torch.Tensor, torch.Tensor], torch.Tensor]
 PredictionFormatter = Callable[[torch.Tensor, torch.Tensor], dict[str, Any]]
@@ -39,9 +39,7 @@ def make_ensemble_prediction_formatter(task: TaskSpec) -> PredictionFormatter:
     """Compose one task-specific formatter for averaged TabM predictions."""
     if task.task_type == TaskType.REGRESSION:
 
-        def format_regression(
-            member_logits: torch.Tensor, target: torch.Tensor
-        ) -> dict[str, Any]:
+        def format_regression(member_logits: torch.Tensor, target: torch.Tensor) -> dict[str, Any]:
             predictions = member_logits.mean(dim=1)
             return {"y_pred": predictions, "y": target, "mse": (predictions, target)}
 
@@ -49,9 +47,7 @@ def make_ensemble_prediction_formatter(task: TaskSpec) -> PredictionFormatter:
 
     if task.task_type == TaskType.BINARY_CLASSIFICATION:
 
-        def format_binary(
-            member_logits: torch.Tensor, target: torch.Tensor
-        ) -> dict[str, Any]:
+        def format_binary(member_logits: torch.Tensor, target: torch.Tensor) -> dict[str, Any]:
             probabilities = torch.sigmoid(member_logits).mean(dim=1)
             labels = (probabilities >= 0.5).long()
             scores = torch.logit(probabilities, eps=torch.finfo(probabilities.dtype).eps)
@@ -67,9 +63,7 @@ def make_ensemble_prediction_formatter(task: TaskSpec) -> PredictionFormatter:
 
     if task.task_type == TaskType.MULTICLASS_CLASSIFICATION:
 
-        def format_multiclass(
-            member_logits: torch.Tensor, target: torch.Tensor
-        ) -> dict[str, Any]:
+        def format_multiclass(member_logits: torch.Tensor, target: torch.Tensor) -> dict[str, Any]:
             probabilities = torch.softmax(member_logits, dim=-1).mean(dim=1)
             labels = probabilities.argmax(dim=1)
             scores = probabilities.clamp_min(torch.finfo(probabilities.dtype).eps).log()
@@ -94,7 +88,7 @@ def create_training_step(
     loss_fn: nn.Module,
 ) -> TrainingStep:
     """Compose a training closure that optimizes each TabM member independently."""
-    prepare_target = make_target_preparer(task)
+    prepare_target = make_target_preparer(task.task_type)
     member_loss = make_ensemble_member_loss(task, loss_fn)
     format_predictions = make_ensemble_prediction_formatter(task)
 
@@ -123,7 +117,7 @@ def create_evaluation_step(
     loss_fn: nn.Module,
 ) -> EvaluationStep:
     """Compose an evaluation closure that averages TabM members for reporting."""
-    prepare_target = make_target_preparer(task)
+    prepare_target = make_target_preparer(task.task_type)
     member_loss = make_ensemble_member_loss(task, loss_fn)
     format_predictions = make_ensemble_prediction_formatter(task)
 

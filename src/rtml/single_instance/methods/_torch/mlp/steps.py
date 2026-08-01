@@ -6,8 +6,8 @@ import torch
 from torch import nn
 
 from rtml.core.tasks import TaskSpec
-from rtml.methods.engines import EvaluationStep, TrainingStep
-from rtml.single_instance.methods._torch.common.task_adapters import (
+from rtml.methods.engines.core import EvaluationStep, TrainingStep
+from rtml.methods.engines.task_adapters import (
     make_prediction_formatter,
     make_target_preparer,
 )
@@ -21,8 +21,8 @@ def create_training_step(
     loss_fn: nn.Module,
 ) -> TrainingStep:
     """Compose the MLP training closure once, outside the batch loop."""
-    prepare_target = make_target_preparer(task)
-    format_predictions = make_prediction_formatter(task)
+    prepare_target = make_target_preparer(task.task_type)
+    format_predictions = make_prediction_formatter(task.task_type)
 
     def training_step(batch: Any) -> dict[str, Any]:
         model.train()
@@ -50,10 +50,10 @@ def create_evaluation_step(
     loss_fn: nn.Module,
 ) -> EvaluationStep:
     """Compose the MLP evaluation closure once, outside the batch loop."""
-    prepare_target = make_target_preparer(task)
-    format_predictions = make_prediction_formatter(task)
+    prepare_target = make_target_preparer(task.task_type)
+    format_predictions = make_prediction_formatter(task.task_type)
 
-    def evaluation_step(batch: Any) -> dict[str, torch.Tensor]:
+    def evaluation_step(batch: Any) -> dict[str, Any]:
         model.eval()
         with torch.inference_mode():
             x, y = batch

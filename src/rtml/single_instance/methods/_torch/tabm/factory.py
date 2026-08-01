@@ -7,9 +7,9 @@ import tabm as tabm_lib
 import torch
 
 from rtml.core.tasks import TaskSpec
-from rtml.methods.engines import TorchFitConfig
-from rtml.single_instance.methods._torch.common.bundles import TorchModelBundle
-from rtml.single_instance.methods._torch.common.task_adapters import (
+from rtml.methods.engines.bundles import TorchModelBundle
+from rtml.methods.engines.config import TorchFitConfig
+from rtml.methods.engines.task_adapters import (
     create_loss_fn,
     create_torch_metrics,
     infer_output_dim,
@@ -40,10 +40,10 @@ def build_tabm_bundle(
 
     model = tabm_lib.TabM.make(
         n_num_features=input_dim,
-        d_out=infer_output_dim(task, n_classes=n_classes),
+        d_out=infer_output_dim(task.task_type, n_classes=n_classes),
         **config,
     ).to(device)
-    loss_fn = create_loss_fn(task)
+    loss_fn = create_loss_fn(task.task_type)
 
     return TorchModelBundle(
         model=model,
@@ -56,9 +56,15 @@ def build_tabm_bundle(
             loss_fn=loss_fn,
         ),
         evaluation_step=create_evaluation_step(task=task, model=model, loss_fn=loss_fn),
-        train_metrics_factory=lambda: create_torch_metrics(task=task),
-        validation_metrics_factory=lambda: create_torch_metrics(task=task),
-        test_metrics_factory=lambda: create_torch_metrics(task=task),
+        train_metrics_factory=lambda: create_torch_metrics(
+            task.task_type, [metric.name for metric in task.metrics]
+        ),
+        validation_metrics_factory=lambda: create_torch_metrics(
+            task.task_type, [metric.name for metric in task.metrics]
+        ),
+        test_metrics_factory=lambda: create_torch_metrics(
+            task.task_type, [metric.name for metric in task.metrics]
+        ),
         metadata={
             "model_class": model.__class__.__name__,
             "k": model.k,

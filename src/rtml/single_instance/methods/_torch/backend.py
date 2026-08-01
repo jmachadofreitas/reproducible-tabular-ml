@@ -1,15 +1,13 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from pathlib import Path
-import re
 from time import perf_counter
 from typing import Any, Protocol
 
 import numpy as np
 import torch
 from sklearn.model_selection import train_test_split
-from torch.utils.data import DataLoader, Subset, TensorDataset
+from torch.utils.data import DataLoader, TensorDataset
 
 from rtml.core.benchmarks import BenchmarkCase
 from rtml.core.methods import MethodSpec
@@ -20,31 +18,28 @@ from rtml.core.runtime import RuntimeSpec
 from rtml.core.tasks import TaskSpec, TaskType
 from rtml.loggers import Logger
 from rtml.methods.backends.base import BackendResult, MethodBackend
-from rtml.methods.engines import (
+from rtml.methods.engines.bundles import TorchModelBundle
+from rtml.methods.engines.checkpointing import (
     CheckpointManager,
-    Evaluator,
-    TorchFitConfig,
-    Trainer,
-    create_lr_scheduler,
-    create_optimizer,
+    build_checkpoint_manager,
+    checkpoint_directory,
 )
-from rtml.single_instance.methods._torch.common.helpers import (
-    as_float32_array,
+from rtml.methods.engines.config import TorchFitConfig
+from rtml.methods.engines.core import Evaluator, Trainer
+from rtml.methods.engines.fitting import fit_model_bundle
+from rtml.methods.engines.runtime import resolve_device, seed_torch
+from rtml.methods.engines.task_adapters import (
+    infer_score_mode,
     require_supervised_target,
-    resolve_device,
-    seed_torch,
+    resolve_score_name,
     target_tensors,
 )
-from rtml.single_instance.methods._torch.common.outputs import build_prediction_set
-from rtml.single_instance.methods._torch.common.bundles import (
+from rtml.single_instance.methods._torch.data import (
     DataLoaderBundle,
     TensorDatasetBundle,
-    TorchModelBundle,
+    as_float32_array,
 )
-from rtml.single_instance.methods._torch.common.task_adapters import (
-    infer_score_mode,
-    resolve_score_name,
-)
+from rtml.single_instance.methods._torch.outputs import build_prediction_set
 from rtml.single_instance.methods._torch.mlp.factory import build_mlp_bundle
 from rtml.single_instance.methods._torch.tabm.factory import build_tabm_bundle
 from rtml.single_instance.preprocessing import build_preprocessor
@@ -78,7 +73,8 @@ class TorchBackend(MethodBackend):
         self,
         model_builders: Mapping[str, TorchModelBuilder] | None = None,
     ) -> None:
-        self._model_builders = dict(model_builders or self.DEFAULT_MODEL_BUILDERS)
+        builders = self.DEFAULT_MODEL_BUILDERS if model_builders is None else model_builders
+        self._model_builders = dict(builders)
         if not self._model_builders:
             raise ValueError("torch backend requires at least one model builder")
 
@@ -100,14 +96,24 @@ class TorchBackend(MethodBackend):
         runtime: RuntimeSpec | None = None,
         logger: Logger | None = None,
     ) -> BackendResult:
-        self.validate_method(method)
+        model_builder = self._model_builder_for(method)
         case.task.validate_columns(case.dataset)
+        if case.task.task_type == TaskType.UNSUPERVISED:
+            raise ValueError("torch backend currently supports supervised tasks only")
         resample = case.resampling.get_resample(resample_id)
+        fit_config = TorchFitConfig.from_mapping(method.fit)
+        resample = self._with_validation_split(
+            case=case,
+            resample=resample,
+            fit_config=fit_config,
+            seed=seed,
+        )
         device = resolve_device(runtime)
         generator = seed_torch(
             seed, deterministic=None if runtime is None else runtime.deterministic
         )
-        transform_config, policy = self._preprocessing_config(method)
+        transform_config = dict(method.transform)
+        policy = transform_config.pop("policy", "neural_default")
 
         fit_start = perf_counter()
         data = self._prepare_data(
@@ -116,37 +122,38 @@ class TorchBackend(MethodBackend):
             policy=policy,
             transform_config=transform_config,
         )
-        bundle = self._build_model_bundle(
-            case=case,
-            method=method,
+        bundle = model_builder(
+            task=case.task,
             input_dim=data.input_dim,
             n_classes=None if data.classes is None else len(data.classes),
+            params=method.model.params,
+            fit_config=fit_config,
             device=device,
         )
-        self._validate_task(case=case)
         loaders = self._build_loaders(
-            case=case,
             data=data,
             bundle=bundle,
-            seed=seed,
             generator=generator,
-            device=device,
         )
-        trainer = self._build_trainer(
-            case=case,
-            method=method,
-            resample=resample,
-            bundle=bundle,
-            loaders=loaders,
+        score_name = resolve_score_name(case.task.primary_metric, case.task.metrics)
+        score_mode = infer_score_mode(score_name)
+        trainer = fit_model_bundle(
+            bundle,
+            loaders.train,
+            validation_dataloader=loaders.validation,
+            test_dataloader=loaders.test,
+            score_name=score_name,
+            score_mode=score_mode,
             device=device,
             logger=logger,
-            seed=seed,
-        )
-        trainer.train(
-            loaders.train,
-            val_dataloader=loaders.validation,
-            test_dataloader=loaders.test if loaders.test_evaluator is not None else None,
-            max_epochs=bundle.fit_config.max_epochs,
+            checkpoint_manager=self._build_checkpoint_manager(
+                case=case,
+                method=method,
+                resample=resample,
+                bundle=bundle,
+                score_mode=score_mode,
+                seed=seed,
+            ),
         )
         fit_time = perf_counter() - fit_start
 
@@ -170,14 +177,49 @@ class TorchBackend(MethodBackend):
             metadata=self._metadata(bundle=bundle, policy=policy, device=device, trainer=trainer),
         )
 
-    def _preprocessing_config(self, method: MethodSpec) -> tuple[dict[str, Any], str]:
-        transform_config = dict(method.transform)
-        policy = transform_config.pop("policy", "neural_default")
-        return transform_config, policy
-
     def _model_builder_for(self, method: MethodSpec) -> TorchModelBuilder:
         self.validate_method(method)
         return self._model_builders[method.model.kind]
+
+    @staticmethod
+    def _with_validation_split(
+        *,
+        case: BenchmarkCase,
+        resample: Resample,
+        fit_config: TorchFitConfig,
+        seed: int,
+    ) -> Resample:
+        if fit_config.validation_fraction <= 0:
+            return resample
+        if resample.valid_idx is not None:
+            raise ValueError(
+                "validation is defined by both resample.valid_idx and fit.validation_fraction"
+            )
+
+        target = require_supervised_target(case)
+        stratify = None
+        if case.task.task_type in {
+            TaskType.BINARY_CLASSIFICATION,
+            TaskType.MULTICLASS_CLASSIFICATION,
+        }:
+            stratify = target.iloc[resample.train_idx]
+        train_idx, valid_idx = train_test_split(
+            resample.train_idx,
+            test_size=fit_config.validation_fraction,
+            random_state=seed,
+            shuffle=True,
+            stratify=stratify,
+        )
+        return Resample(
+            id=resample.id,
+            train_idx=train_idx,
+            valid_idx=valid_idx,
+            test_idx=resample.test_idx,
+            metadata={
+                **resample.metadata,
+                "validation_fraction": fit_config.validation_fraction,
+            },
+        )
 
     def _prepare_data(
         self,
@@ -191,6 +233,8 @@ class TorchBackend(MethodBackend):
         y = require_supervised_target(case)
         x_train = x.iloc[resample.train_idx]
         y_train = y.iloc[resample.train_idx]
+        x_validation = None if resample.valid_idx is None else x.iloc[resample.valid_idx]
+        y_validation = None if resample.valid_idx is None else y.iloc[resample.valid_idx]
         x_test = x.iloc[resample.test_idx]
         y_test = y.iloc[resample.test_idx]
 
@@ -201,197 +245,59 @@ class TorchBackend(MethodBackend):
             options=transform_config,
         )
         x_train_array = as_float32_array(preprocessor.fit_transform(x_train, y_train))
+        x_validation_array = (
+            None if x_validation is None else as_float32_array(preprocessor.transform(x_validation))
+        )
         x_test_array = as_float32_array(preprocessor.transform(x_test))
         y_train_tensor, y_test_tensor, classes = target_tensors(
-            task=case.task,
+            task_type=case.task.task_type,
             y_train=y_train,
             y_eval=y_test,
         )
-        if case.task.task_type == TaskType.BINARY_CLASSIFICATION and (
-            classes is None or len(classes) != 2
-        ):
-            raise ValueError(
-                "binary classification requires exactly two classes in the training split"
+        validation_dataset = None
+        if x_validation_array is not None and y_validation is not None:
+            _, y_validation_tensor, _ = target_tensors(
+                task_type=case.task.task_type,
+                y_train=y_train,
+                y_eval=y_validation,
+            )
+            validation_dataset = TensorDataset(
+                torch.as_tensor(x_validation_array),
+                y_validation_tensor,
             )
 
         return TensorDatasetBundle(
-            train_dataset=TensorDataset(torch.as_tensor(x_train_array), y_train_tensor),
-            test_dataset=TensorDataset(torch.as_tensor(x_test_array), y_test_tensor),
-            y_train_tensor=y_train_tensor,
+            train=TensorDataset(torch.as_tensor(x_train_array), y_train_tensor),
+            validation=validation_dataset,
+            test=TensorDataset(torch.as_tensor(x_test_array), y_test_tensor),
             classes=classes,
             input_dim=x_train_array.shape[1],
         )
 
-    def _build_model_bundle(
-        self,
-        *,
-        case: BenchmarkCase,
-        method: MethodSpec,
-        input_dim: int,
-        n_classes: int | None,
-        device: torch.device,
-    ) -> TorchModelBundle:
-        return self._model_builder_for(method)(
-            task=case.task,
-            input_dim=input_dim,
-            n_classes=n_classes,
-            params=method.model.params,
-            fit_config=TorchFitConfig.from_mapping(method.fit),
-            device=device,
-        )
-
-    def _validate_task(self, *, case: BenchmarkCase) -> None:
-        if case.task.task_type == TaskType.UNSUPERVISED:
-            raise ValueError("torch backend currently supports supervised tasks only")
-
     def _build_loaders(
         self,
         *,
-        case: BenchmarkCase,
         data: TensorDatasetBundle,
         bundle: TorchModelBundle,
-        seed: int,
         generator: torch.Generator,
-        device: torch.device,
     ) -> DataLoaderBundle:
-        train_dataset: TensorDataset | Subset = data.train_dataset
-        validation_loader = None
-        validation_evaluator = None
-
-        if bundle.fit_config.validation_fraction > 0:
-            train_indices, validation_indices = train_test_split(
-                np.arange(len(data.train_dataset)),
-                test_size=bundle.fit_config.validation_fraction,
-                random_state=seed,
-                shuffle=True,
-                stratify=self._stratify_values(case=case, data=data),
-            )
-            train_dataset = Subset(data.train_dataset, train_indices.tolist())
-            validation_dataset = Subset(data.train_dataset, validation_indices.tolist())
-            validation_loader = DataLoader(
-                validation_dataset, batch_size=bundle.fit_config.batch_size
-            )
-            validation_evaluator = self._build_evaluator(
-                bundle=bundle,
-                device=device,
-                with_metrics=True,
-            )
-
+        batch_size = bundle.fit_config.batch_size
         return DataLoaderBundle(
             train=DataLoader(
-                train_dataset,
-                batch_size=bundle.fit_config.batch_size,
+                data.train,
+                batch_size=batch_size,
                 shuffle=True,
                 generator=generator,
             ),
-            validation=validation_loader,
+            validation=None
+            if data.validation is None
+            else DataLoader(data.validation, batch_size=batch_size, shuffle=False),
             test=DataLoader(
-                data.test_dataset, batch_size=bundle.fit_config.batch_size, shuffle=False
+                data.test,
+                batch_size=batch_size,
+                shuffle=False,
             ),
-            validation_evaluator=validation_evaluator,
-            test_evaluator=self._build_test_evaluator(bundle=bundle, device=device),
         )
-
-    def _stratify_values(
-        self,
-        *,
-        case: BenchmarkCase,
-        data: TensorDatasetBundle,
-    ) -> np.ndarray | None:
-        """Return stratification values for train/validation split, if applicable."""
-        if case.task.task_type in {
-            TaskType.BINARY_CLASSIFICATION,
-            TaskType.MULTICLASS_CLASSIFICATION,
-        }:
-            return data.y_train_tensor.numpy()
-        return None
-
-    def _build_evaluator(
-        self,
-        *,
-        bundle: TorchModelBundle,
-        device: torch.device,
-        with_metrics: bool,
-    ) -> Evaluator:
-        metrics = bundle.make_validation_metrics() if with_metrics else None
-        return Evaluator(bundle.make_evaluation_step(), metrics=metrics, device=device)
-
-    def _build_test_evaluator(
-        self,
-        *,
-        bundle: TorchModelBundle,
-        device: torch.device,
-    ) -> Evaluator | None:
-        if not bundle.fit_config.tracking.get("log_test_metrics", False):
-            return None
-        return Evaluator(
-            bundle.make_evaluation_step(),
-            metrics=bundle.make_test_metrics(),
-            device=device,
-        )
-
-    def _build_trainer(
-        self,
-        *,
-        case: BenchmarkCase,
-        method: MethodSpec,
-        resample: Resample,
-        bundle: TorchModelBundle,
-        loaders: DataLoaderBundle,
-        device: torch.device,
-        logger: Logger | None,
-        seed: int,
-    ) -> Trainer:
-        score_name = resolve_score_name(case.task)
-        optimizer = create_optimizer(bundle.model, **bundle.fit_config.optimizer)
-        lr_scheduler = create_lr_scheduler(
-            optimizer,
-            config=None
-            if bundle.fit_config.lr_scheduler is None
-            else dict(bundle.fit_config.lr_scheduler),
-            max_epochs=bundle.fit_config.max_epochs,
-        )
-        if bundle.fit_config.hp_scheduler is not None:
-            raise NotImplementedError(
-                "hp_scheduler requires method-owned hyperparameter state; "
-                "only lr_scheduler is wired for now"
-            )
-        checkpoint_manager = self._build_checkpoint_manager(
-            case=case,
-            method=method,
-            resample=resample,
-            bundle=bundle,
-            score_mode=infer_score_mode(score_name),
-            seed=seed,
-        )
-
-        trainer = Trainer(
-            bundle.create_training_step(optimizer),
-            train_metrics=bundle.make_train_metrics(),
-            lr_scheduler=lr_scheduler,
-            val_evaluator=loaders.validation_evaluator,
-            test_evaluator=loaders.test_evaluator,
-            score_name=score_name,
-            score_mode=infer_score_mode(score_name),
-            device=device,
-            max_epochs=bundle.fit_config.max_epochs,
-            val_every_n_epochs=bundle.fit_config.every_n_epochs,
-            early_stopping_patience=bundle.fit_config.early_stopping_patience,
-            logger=logger,
-            checkpoint_manager=checkpoint_manager,
-        )
-        if checkpoint_manager is not None:
-            objects: dict[str, Any] = {
-                "model": bundle.model,
-                "optimizer": optimizer,
-                "trainer": trainer,
-            }
-            if lr_scheduler is not None:
-                objects["lr_scheduler"] = lr_scheduler
-            checkpoint_manager.set_objects(objects)
-            resume_path = checkpoint_manager.load_resume_checkpoint()
-            trainer.resume_checkpoint_path = None if resume_path is None else str(resume_path)
-        return trainer
 
     def _build_checkpoint_manager(
         self,
@@ -404,59 +310,18 @@ class TorchBackend(MethodBackend):
         seed: int,
     ) -> CheckpointManager | None:
         config = dict(bundle.fit_config.checkpoint)
-        enabled = bool(config.pop("enabled", bool(config.get("resume_from"))))
-        if not config and not enabled:
-            return None
-        if not enabled:
-            return None
-        directory = self._checkpoint_dir(
-            case=case,
-            method=method,
-            resample=resample,
+        config.setdefault("save_best", resample.valid_idx is not None)
+        directory = checkpoint_directory(
+            config.pop("dir", ".runs/checkpoints"),
+            case_name=case.name,
+            method_name=method.name,
+            resample_id=resample.id,
             seed=seed,
-            root=config.pop("dir", ".runs/checkpoints"),
         )
-        score_mode_name = str(config.pop("score_mode", score_mode))
-        save_last = bool(config.pop("save_last", True))
-        save_best = bool(config.pop("save_best", True))
-        every_n_epochs = int(config.pop("every_n_epochs", 1))
-        delay_n_epochs = int(config.pop("delay_n_epochs", 0))
-        n_saved = config.pop("n_saved", 1)
-        atomic = bool(config.pop("atomic", True))
-        require_empty = bool(config.pop("require_empty", False))
-        resume_from = config.pop("resume_from", None)
-        if config:
-            unknown = ", ".join(sorted(config))
-            raise ValueError(f"unknown torch checkpoint config: {unknown}")
-        return CheckpointManager(
+        return build_checkpoint_manager(
+            config,
             directory=directory,
-            score_mode=score_mode_name,
-            save_last=save_last,
-            save_best=save_best,
-            every_n_epochs=every_n_epochs,
-            delay_n_epochs=delay_n_epochs,
-            n_saved=None if n_saved is None else int(n_saved),
-            atomic=atomic,
-            require_empty=require_empty,
-            resume_from=resume_from,
-        )
-
-    @staticmethod
-    def _checkpoint_dir(
-        *,
-        case: BenchmarkCase,
-        method: MethodSpec,
-        resample: Resample,
-        seed: int,
-        root: str | Path,
-    ) -> Path:
-        root = Path(root)
-        return (
-            root
-            / _safe_path_part(case.name)
-            / _safe_path_part(method.name)
-            / _safe_path_part(resample.id)
-            / f"seed_{seed}"
+            default_score_mode=score_mode,
         )
 
     def _evaluate(
@@ -470,7 +335,7 @@ class TorchBackend(MethodBackend):
         classes: np.ndarray | None,
         device: torch.device,
     ) -> PredictionSet:
-        evaluator = self._build_evaluator(bundle=bundle, device=device, with_metrics=False)
+        evaluator = Evaluator(bundle.evaluation_step, device=device)
         outputs, _ = evaluator.evaluate(test_loader)
         return build_prediction_set(
             case=case,
@@ -507,7 +372,3 @@ class TorchBackend(MethodBackend):
         if trainer.resume_checkpoint_path is not None:
             metadata["resume_checkpoint_path"] = trainer.resume_checkpoint_path
         return metadata
-
-
-def _safe_path_part(value: str) -> str:
-    return re.sub(r"[^A-Za-z0-9_.-]+", "_", value).strip("._") or "run"
