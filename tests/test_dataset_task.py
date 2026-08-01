@@ -1,7 +1,10 @@
+import numpy as np
 import pandas as pd
 import pytest
 
 from rtml.core.datasets import Dataset, FeatureInfo, FeatureKind, FeatureSchema, FeatureTag
+from rtml.core.resampling import ResamplingSpec, ResamplingStrategy
+from rtml.core.tasks import MetricSpec, TaskSpec, TaskType
 from rtml.single_instance.datasets.sklearn_loaders import (
     build_sklearn_benchmark_case,
     build_sklearn_benchmark_suite,
@@ -13,8 +16,6 @@ from rtml.single_instance.datasets.sklearn_loaders import (
     load_sklearn_dataset,
     load_sklearn_regression_suite,
 )
-from rtml.core.resampling import ResamplingStrategy
-from rtml.core.tasks import MetricSpec, TaskSpec, TaskType
 
 
 def make_dataset() -> Dataset:

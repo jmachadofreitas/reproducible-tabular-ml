@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from typing import Any
 
+import numpy as np
 import torch
 from ignite.engine import Engine, Events, State
 from ignite.handlers import EarlyStopping
@@ -74,14 +75,10 @@ class Evaluator(Engine):
         self.metrics.reset()
 
     def _store_output(self, engine: Engine) -> None:
-        output = engine.state.output
-        if isinstance(output, Mapping):
-            self.outputs.append(dict(output))
+        self.outputs.append(dict(engine.state.output))
 
     def _update_metrics(self, engine: Engine) -> None:
-        output = engine.state.output
-        if isinstance(output, Mapping):
-            self.metrics.update(**output)
+        self.metrics.update(**engine.state.output)
 
     def _store_metrics(self, engine: Engine) -> None:
         engine.state.metrics = self.metrics.compute()
@@ -97,6 +94,18 @@ class Evaluator(Engine):
     def evaluate(self, dataloader: DataLoader) -> tuple[dict[str, list[Any]], dict[str, Any]]:
         state = self.run(dataloader)
         return self._collect_outputs(), dict(state.metrics)
+
+
+def concat_evaluator_output(outputs: Mapping[str, list[Any]], name: str) -> np.ndarray:
+    """Concatenate one named output collected across evaluator batches."""
+    values = outputs.get(name)
+    if not values:
+        raise ValueError(f"evaluator did not produce {name!r} outputs")
+    arrays = [
+        value.detach().cpu().numpy() if isinstance(value, torch.Tensor) else np.asarray(value)
+        for value in values
+    ]
+    return np.concatenate(arrays, axis=0)
 
 
 class Trainer(Engine):
@@ -219,9 +228,7 @@ class Trainer(Engine):
         self.train_metrics.reset()
 
     def _update_train_metrics(self, engine: Engine) -> None:
-        output = engine.state.output
-        if isinstance(output, Mapping):
-            self.train_metrics.update(**output)
+        self.train_metrics.update(**engine.state.output)
 
     def _complete_train_epoch(self, engine: Engine) -> None:
         metrics = self.train_metrics.compute()
@@ -289,9 +296,7 @@ class Trainer(Engine):
     def _log_artifact(self, path: str, *, artifact_path: str | None = None) -> None:
         if self.run_logger is None:
             return
-        log_artifact = getattr(self.run_logger, "log_artifact", None)
-        if log_artifact is not None:
-            log_artifact(path, artifact_path=artifact_path)
+        self.run_logger.log_artifact(path, artifact_path=artifact_path)
 
     def _score_from_validation(self, engine: Engine) -> float:
         if self.score_name is None:

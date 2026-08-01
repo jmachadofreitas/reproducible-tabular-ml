@@ -96,13 +96,6 @@ def build_sklearn_estimator(
     raise AssertionError(f"unhandled sklearn model kind {model_kind!r}")
 
 
-def default_single_instance_backends() -> tuple[MethodBackend, ...]:
-    """Return built-in single-instance method backends."""
-    from rtml.single_instance.methods._torch import TorchBackend
-
-    return (SklearnBackend(), TorchBackend())
-
-
 def _make_prediction_set(
     *,
     case: BenchmarkCase,

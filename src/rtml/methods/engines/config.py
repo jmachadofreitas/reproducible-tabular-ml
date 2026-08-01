@@ -13,6 +13,8 @@ class TorchFitConfig:
         batch_size: int = 32,
         max_epochs: int = 10,
         validation_fraction: float = 0.0,
+        validation_every_n_epochs: int | None = None,
+        early_stopping_patience: int | None = None,
         tracking: Mapping[str, Any] | None = None,
         optimizer: Mapping[str, Any] | None = None,
         lr_scheduler: Mapping[str, Any] | None = None,
@@ -23,8 +25,21 @@ class TorchFitConfig:
         self.max_epochs = int(max_epochs)
         self.validation_fraction = float(validation_fraction or 0.0)
         self.tracking = dict(tracking or {})
-        self.every_n_epochs = int(self.tracking.get("every_n_epochs", 1))
-        self.early_stopping_patience = self.tracking.get("early_stopping_patience")
+        configured_interval = (
+            self.tracking.get("every_n_epochs", 1)
+            if validation_every_n_epochs is None
+            else validation_every_n_epochs
+        )
+        self.validation_every_n_epochs = int(configured_interval)
+        self.every_n_epochs = self.validation_every_n_epochs
+        configured_patience = (
+            self.tracking.get("early_stopping_patience")
+            if early_stopping_patience is None
+            else early_stopping_patience
+        )
+        self.early_stopping_patience = (
+            None if configured_patience is None else int(configured_patience)
+        )
         self.optimizer = dict(optimizer or {})
         self.lr_scheduler = None if lr_scheduler is None else dict(lr_scheduler)
         self.hp_scheduler = None if hp_scheduler is None else dict(hp_scheduler)
@@ -40,6 +55,8 @@ class TorchFitConfig:
             batch_size=values.pop("batch_size", 32),
             max_epochs=values.pop("max_epochs", 10),
             validation_fraction=values.pop("validation_fraction", 0.0),
+            validation_every_n_epochs=values.pop("validation_every_n_epochs", None),
+            early_stopping_patience=values.pop("early_stopping_patience", None),
             tracking=values.pop("tracking", None),
             optimizer=values.pop("optimizer", None),
             lr_scheduler=values.pop("lr_scheduler", scheduler),
@@ -56,10 +73,9 @@ class TorchFitConfig:
             raise ValueError("batch_size must be >= 1")
         if self.max_epochs < 1:
             raise ValueError("max_epochs must be >= 1")
-        if self.every_n_epochs < 1:
-            raise ValueError("tracking.every_n_epochs must be >= 1")
+        if self.validation_every_n_epochs < 1:
+            raise ValueError("validation_every_n_epochs must be >= 1")
+        if self.early_stopping_patience is not None and self.early_stopping_patience < 1:
+            raise ValueError("early_stopping_patience must be >= 1")
         if self.validation_fraction and not 0.0 < self.validation_fraction < 1.0:
             raise ValueError("validation_fraction must be between 0 and 1")
-        if self.early_stopping_patience is not None and not self.validation_fraction:
-            raise ValueError("early_stopping_patience requires validation_fraction")
-

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from pathlib import Path
+import re
 from typing import Any
 
 import torch
@@ -75,6 +76,8 @@ class CheckpointManager:
             raise ValueError("checkpoint every_n_epochs must be >= 1")
         if delay_n_epochs < 0:
             raise ValueError("checkpoint delay_n_epochs must be >= 0")
+        if resume_from in {"last", "best"} and n_saved != 1:
+            raise ValueError("named checkpoint resume requires n_saved=1")
 
         self.directory = Path(directory)
         self.score_mode = score_mode
@@ -138,8 +141,11 @@ class CheckpointManager:
             raise ValueError("checkpoint objects must be set before saving")
 
         self._score = score
-        if score is not None and self._is_better(score):
-            self.best_score = score
+        is_better = False
+        if score is not None:
+            is_better = self._is_better(score)
+            if is_better:
+                self.best_score = score
         self.state.update(
             epoch=epoch,
             step=step,
@@ -155,7 +161,7 @@ class CheckpointManager:
             self.last_path = last_path
 
         best_path = None
-        if self.save_best and score is not None:
+        if self.save_best and is_better:
             previous_best = self._best_handler.last_checkpoint
             self._best_handler(engine, self._objects)
             candidate_best = _path_or_none(self._best_handler.last_checkpoint)
@@ -204,6 +210,62 @@ class CheckpointManager:
         return "{filename_prefix}_{global_step}.ckpt"
 
 
+def checkpoint_directory(
+    root: str | Path,
+    *,
+    case_name: str,
+    method_name: str,
+    resample_id: str,
+    seed: int,
+) -> Path:
+    """Return the checkpoint directory for one planned run."""
+    return (
+        Path(root)
+        / _safe_path_part(case_name)
+        / _safe_path_part(method_name)
+        / _safe_path_part(resample_id)
+        / f"seed_{seed}"
+    )
+
+
+def build_checkpoint_manager(
+    config: Mapping[str, Any] | None,
+    *,
+    directory: str | Path,
+    default_score_mode: str,
+) -> CheckpointManager | None:
+    """Build an optional checkpoint manager from method fit configuration."""
+    options = dict(config or {})
+    enabled = bool(options.pop("enabled", bool(options.get("resume_from"))))
+    if not enabled:
+        return None
+
+    score_mode = str(options.pop("score_mode", default_score_mode))
+    save_last = bool(options.pop("save_last", True))
+    save_best = bool(options.pop("save_best", True))
+    every_n_epochs = int(options.pop("every_n_epochs", 1))
+    delay_n_epochs = int(options.pop("delay_n_epochs", 0))
+    n_saved = _optional_int(options.pop("n_saved", 1))
+    atomic = bool(options.pop("atomic", True))
+    require_empty = bool(options.pop("require_empty", False))
+    resume_from = options.pop("resume_from", None)
+    if options:
+        unknown = ", ".join(sorted(options))
+        raise ValueError(f"unknown torch checkpoint config: {unknown}")
+    return CheckpointManager(
+        directory=directory,
+        score_mode=score_mode,
+        save_last=save_last,
+        save_best=save_best,
+        every_n_epochs=every_n_epochs,
+        delay_n_epochs=delay_n_epochs,
+        n_saved=n_saved,
+        atomic=atomic,
+        require_empty=require_empty,
+        resume_from=resume_from,
+    )
+
+
 def load_checkpoint(
     path: str | Path,
     *,
@@ -239,5 +301,15 @@ def _optional_float(value: Any) -> float | None:
     return float(value)
 
 
+def _optional_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    return int(value)
+
+
 def _is_inf(value: float) -> bool:
     return value in {float("inf"), float("-inf")}
+
+
+def _safe_path_part(value: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_.-]+", "_", value).strip("._") or "run"
