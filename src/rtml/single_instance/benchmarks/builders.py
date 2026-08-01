@@ -1,7 +1,5 @@
 """Build benchmark suites from configuration."""
 
-from __future__ import annotations
-
 from collections.abc import Mapping
 from typing import Any
 
@@ -36,6 +34,7 @@ def build_benchmark_suite(config: Mapping[str, Any] | None) -> BenchmarkSuite:
 
 
 def build_sklearn_benchmark_suite(config: Mapping[str, Any]) -> BenchmarkSuite:
+    """Build one of the bundled sklearn benchmark suites."""
     suite_name = str(config.get("suite") or "classification").lower()
     if suite_name == "classification":
         suite = load_sklearn_classification_suite()
@@ -55,6 +54,7 @@ def build_sklearn_benchmark_suite(config: Mapping[str, Any]) -> BenchmarkSuite:
 
 
 def build_openml_benchmark_suite(config: Mapping[str, Any]) -> BenchmarkSuite:
+    """Build an OpenML benchmark suite from an ID or known alias."""
     suite_id = openml_suite_id(config)
     suite = load_openml_suite(suite_id)
     return BenchmarkSuite(
@@ -65,6 +65,7 @@ def build_openml_benchmark_suite(config: Mapping[str, Any]) -> BenchmarkSuite:
 
 
 def openml_suite_id(config: Mapping[str, Any]) -> int:
+    """Resolve the OpenML suite selected by a benchmark config."""
     suite_id = config.get("suite_id")
     if suite_id is not None:
         return int(suite_id)
