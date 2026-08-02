@@ -2,12 +2,16 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Literal, overload
+from typing import Any, Literal, TypeAlias, overload
 
 import numpy as np
+import numpy.typing as npt
 import pandas as pd
 
 from rtml.core.datasets import FeatureInfo, FeatureKind, FeatureSchema, FeatureTagLike
+
+
+IndexArray: TypeAlias = npt.NDArray[np.integer[Any]]
 
 
 @dataclass
@@ -97,7 +101,7 @@ class MultiInstanceDataset:
         stop = self.bag_offsets[bag_position + 1]
         return self.instance_table.iloc[start:stop]
 
-    def sample_ids_for(self, indices: Sequence[int] | np.ndarray) -> np.ndarray:
+    def sample_ids_for(self, indices: Sequence[int] | IndexArray) -> np.ndarray:
         """Return stable bag ids for selected positional bag indices."""
         positions = list(indices)
         if self.bag_id_column is not None:
@@ -107,7 +111,7 @@ class MultiInstanceDataset:
     def subgroup_values(
         self,
         columns: Iterable[str],
-        indices: Sequence[int] | np.ndarray,
+        indices: Sequence[int] | IndexArray,
     ) -> dict[str, np.ndarray]:
         """Return bag-level subgroup columns aligned with selected bags."""
         selected_columns = list(columns)
@@ -136,21 +140,29 @@ class MultiInstanceDataset:
             },
             "bag_offsets": self.bag_offsets,
             "metadata": {
-                key: value for key, value in self.metadata.items() if key != "fingerprint"
+                key: value
+                for key, value in self.metadata.items()
+                if key != "fingerprint"
             },
         }
 
     def require_bag_columns(self, columns: Iterable[str]) -> None:
         missing = [column for column in columns if column not in self._bag_columns]
         if missing:
-            raise ValueError(f"bag columns not present in dataset {self.name!r}: {missing}")
+            raise ValueError(
+                f"bag columns not present in dataset {self.name!r}: {missing}"
+            )
 
     def require_instance_columns(self, columns: Iterable[str]) -> None:
         missing = [column for column in columns if column not in self._instance_columns]
         if missing:
-            raise ValueError(f"instance columns not present in dataset {self.name!r}: {missing}")
+            raise ValueError(
+                f"instance columns not present in dataset {self.name!r}: {missing}"
+            )
 
-    def select_bags(self, bag_positions: Sequence[int] | slice) -> MultiInstanceDataset:
+    def select_bags(
+        self, bag_positions: Sequence[int] | slice | IndexArray
+    ) -> MultiInstanceDataset:
         if isinstance(bag_positions, slice):
             positions = list(range(self.n_bags))[bag_positions]
         else:
@@ -233,8 +245,12 @@ class MultiInstanceDataset:
 
         frame_columns = [str(column) for column in frame.columns]
         schema_columns = schema.names
-        missing_from_schema = [column for column in frame_columns if column not in schema]
-        extra_in_schema = [column for column in schema_columns if column not in frame_columns]
+        missing_from_schema = [
+            column for column in frame_columns if column not in schema
+        ]
+        extra_in_schema = [
+            column for column in schema_columns if column not in frame_columns
+        ]
         if missing_from_schema or extra_in_schema:
             raise ValueError(
                 f"{frame_name} columns and schema features must match "
@@ -257,9 +273,13 @@ class MultiInstanceDataset:
         if self.bag_id_column is not None:
             self.require_bag_columns([self.bag_id_column])
             if self.bag_schema.get(self.bag_id_column).kind != FeatureKind.ID:
-                raise ValueError(f"bag_id_column {self.bag_id_column!r} must have FeatureKind.ID")
+                raise ValueError(
+                    f"bag_id_column {self.bag_id_column!r} must have FeatureKind.ID"
+                )
             if self.bag_table[self.bag_id_column].duplicated().any():
-                raise ValueError(f"bag_id_column {self.bag_id_column!r} contains duplicate values")
+                raise ValueError(
+                    f"bag_id_column {self.bag_id_column!r} contains duplicate values"
+                )
 
         if self.instance_id_column is not None:
             self.require_instance_columns([self.instance_id_column])
