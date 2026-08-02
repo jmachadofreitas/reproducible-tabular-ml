@@ -1,0 +1,49 @@
+study:
+  name: pop-stats
+  kind: comparison
+  metadata:
+    intent: evaluate permutation-invariant set regression
+
+benchmark:
+  source: popstats
+  task_ids: [1, 2, 3, 4]
+  n_bags: 64
+  instances_per_bag: 64
+  n_folds: 2
+
+methods:
+  - name: DeepSets
+    transform:
+      policy: neural_default
+    model:
+      kind: deep_sets
+      backend: torch
+      params:
+        encoder_dims: [64, 64]
+        latent_dim: 64
+        predictor_dims: [64]
+        pooling: mean
+    fit:
+      batch_size: 16
+      max_epochs: 20
+      optimizer:
+        name: adam
+        lr: 0.001
+    metadata:
+      factor.family: set_model
+      factor.estimator: DeepSets
+
+seeds:
+  - 0
+
+execution:
+  executor: sequential
+  show_progress: true
+  prediction_dir: ${hydra:runtime.output_dir}/predictions
+  summary_csv: ${hydra:runtime.output_dir}/summary.csv
+  summary_json: ${hydra:runtime.output_dir}/summary.json
+  aggregate_csv: ${hydra:runtime.output_dir}/aggregate.csv
+  aggregate_json: ${hydra:runtime.output_dir}/aggregate.json
+
+logger:
+  backend: mlflow

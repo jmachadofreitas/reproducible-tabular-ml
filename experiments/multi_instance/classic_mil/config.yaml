@@ -1,0 +1,72 @@
+study:
+  name: classic-mil-attention
+  kind: comparison
+  metadata:
+    intent: compare plain and gated attention pooling
+
+benchmark:
+  source: classic_mil
+  datasets: [elephant, fox, tiger]
+  n_folds: 5
+  valid_size: 0.2
+  seed: 0
+
+methods:
+  - name: AttentionDeepMIL
+    transform:
+      policy: neural_default
+    model:
+      kind: attention_deep_mil
+      backend: torch
+      params:
+        encoder_dims: [128]
+        embedding_dim: 128
+        attention_dim: 64
+        attention: plain
+    fit:
+      batch_size: 32
+      max_epochs: 50
+      early_stopping_patience: 5
+      optimizer:
+        name: adam
+        lr: 0.001
+    metadata:
+      factor.family: attention_deep_mil
+      factor.attention: plain
+
+  - name: GatedAttentionDeepMIL
+    transform:
+      policy: neural_default
+    model:
+      kind: attention_deep_mil
+      backend: torch
+      params:
+        encoder_dims: [128]
+        embedding_dim: 128
+        attention_dim: 64
+        attention: gated
+    fit:
+      batch_size: 32
+      max_epochs: 50
+      early_stopping_patience: 5
+      optimizer:
+        name: adam
+        lr: 0.001
+    metadata:
+      factor.family: attention_deep_mil
+      factor.attention: gated
+
+seeds:
+  - 0
+
+execution:
+  executor: sequential
+  show_progress: true
+  prediction_dir: ${hydra:runtime.output_dir}/predictions
+  summary_csv: ${hydra:runtime.output_dir}/summary.csv
+  summary_json: ${hydra:runtime.output_dir}/summary.json
+  aggregate_csv: ${hydra:runtime.output_dir}/aggregate.csv
+  aggregate_json: ${hydra:runtime.output_dir}/aggregate.json
+
+logger:
+  backend: mlflow

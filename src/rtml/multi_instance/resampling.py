@@ -1,9 +1,13 @@
-from __future__ import annotations
-
 from typing import Any
 
-from sklearn.model_selection import GroupKFold, KFold, StratifiedKFold, train_test_split
 import numpy as np
+from sklearn.model_selection import (
+    GroupKFold,
+    GroupShuffleSplit,
+    KFold,
+    StratifiedKFold,
+    train_test_split,
+)
 
 from rtml.core.resampling import Resample, ResamplingPlan, ResamplingSpec, ResamplingStrategy
 from rtml.multi_instance.datasets.base import MultiInstanceDataset
@@ -16,7 +20,11 @@ def build_multi_instance_resampling_plan(
     task: MultiInstanceTask,
     spec: ResamplingSpec,
 ) -> ResamplingPlan:
-    """Materialize a resampling plan whose indices refer to bag positions."""
+    """Materialize bag-position splits, including optional saved validation bags.
+
+    ``valid_size`` is taken from each outer training partition. Grouped
+    resampling keeps groups isolated across training, validation, and test.
+    """
     task.validate_columns(dataset)
     bag_indices = np.arange(dataset.n_bags)
     resamples: list[Resample] = []
@@ -89,6 +97,16 @@ def build_multi_instance_resampling_plan(
             f"multi-instance resampling does not support {spec.strategy.value}"
         )
 
+    if spec.valid_size is not None:
+        resamples = [
+            _with_validation_split(
+                resample,
+                dataset=dataset,
+                spec=spec,
+            )
+            for resample in resamples
+        ]
+
     return ResamplingPlan(
         dataset_name=dataset.name,
         task_name=task.name,
@@ -118,6 +136,51 @@ def _group_values(dataset: MultiInstanceDataset, columns: list[str]) -> np.ndarr
     values = np.empty(dataset.n_bags, dtype=object)
     values[:] = list(dataset.bag_table.loc[:, columns].itertuples(index=False, name=None))
     return values
+
+
+def _with_validation_split(
+    resample: Resample,
+    *,
+    dataset: MultiInstanceDataset,
+    spec: ResamplingSpec,
+) -> Resample:
+    if spec.strategy == ResamplingStrategy.GROUP_KFOLD:
+        groups = _group_values(dataset, spec.groups)
+        splitter = GroupShuffleSplit(
+            n_splits=1,
+            test_size=spec.valid_size,
+            random_state=spec.seed,
+        )
+        train_pos, valid_pos = next(
+            splitter.split(
+                resample.train_idx,
+                groups=groups[resample.train_idx],
+            )
+        )
+        train_idx = resample.train_idx[train_pos]
+        valid_idx = resample.train_idx[valid_pos]
+    else:
+        stratify = (
+            None
+            if spec.stratify is None
+            else _bag_column(dataset, spec.stratify, role="stratify")[resample.train_idx]
+        )
+        shuffle = spec.shuffle or stratify is not None
+        train_idx, valid_idx = train_test_split(
+            resample.train_idx,
+            test_size=spec.valid_size,
+            shuffle=shuffle,
+            random_state=spec.seed if shuffle else None,
+            stratify=stratify,
+        )
+
+    return Resample(
+        id=resample.id,
+        train_idx=train_idx,
+        valid_idx=valid_idx,
+        test_idx=resample.test_idx,
+        metadata={**resample.metadata, "valid_size": spec.valid_size},
+    )
 
 
 def _resample(id: str, train_idx, test_idx, *, fold: int | None = None) -> Resample:

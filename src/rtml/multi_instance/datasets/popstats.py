@@ -247,6 +247,7 @@ def load_popstats_benchmark_case(
     instances_per_bag: int = DEFAULT_INSTANCES_PER_BAG,
     seed: int = DEFAULT_SEED,
     n_folds: int = 5,
+    valid_size: float | None = None,
 ) -> BenchmarkCase[MultiInstanceDataset, MultiInstanceTask]:
     """Create one PopStats benchmark case with bag-level K-fold resampling."""
     dataset, task = load_popstats_dataset(
@@ -259,6 +260,7 @@ def load_popstats_benchmark_case(
         name=f"{dataset.name}_bag_kfold",
         strategy=ResamplingStrategy.KFOLD,
         n_folds=n_folds,
+        valid_size=valid_size,
         shuffle=True,
         seed=seed,
         metadata={"source": "popstats", "paradigm": "multi_instance"},
@@ -279,6 +281,7 @@ def load_popstats_suite(
     instances_per_bag: int = DEFAULT_INSTANCES_PER_BAG,
     seed: int = DEFAULT_SEED,
     n_folds: int = 5,
+    valid_size: float | None = None,
 ) -> BenchmarkSuite[MultiInstanceDataset, MultiInstanceTask]:
     """Create a small PopStats multiple-instance regression suite."""
     ids = list(task_ids or POPSTATS_TASKS)
@@ -289,6 +292,7 @@ def load_popstats_suite(
             instances_per_bag=instances_per_bag,
             seed=seed,
             n_folds=n_folds,
+            valid_size=valid_size,
         )
         for task_id in ids
     ]
