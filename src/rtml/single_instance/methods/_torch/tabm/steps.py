@@ -11,7 +11,8 @@ from rtml.methods.engines.core import EvaluationStep, TrainingStep
 from rtml.methods.engines.task_adapters import make_target_preparer
 
 MemberLoss = Callable[[torch.Tensor, torch.Tensor], torch.Tensor]
-PredictionFormatter = Callable[[torch.Tensor, torch.Tensor], dict[str, Any]]
+TrainEvaluationOutputFormatter = Callable[[torch.Tensor, torch.Tensor], dict[str, Any]]
+PredictionOutputFormatter = Callable[[torch.Tensor], dict[str, torch.Tensor]]
 
 
 def make_ensemble_member_loss(task: TaskSpec, loss_fn: nn.Module) -> MemberLoss:
@@ -35,13 +36,22 @@ def make_ensemble_member_loss(task: TaskSpec, loss_fn: nn.Module) -> MemberLoss:
     raise ValueError(f"unsupported TabM task type: {task.task_type.value}")
 
 
-def make_ensemble_prediction_formatter(task: TaskSpec) -> PredictionFormatter:
+def make_ensemble_train_evaluation_output_formatter(
+    task: TaskSpec,
+) -> TrainEvaluationOutputFormatter:
     """Compose one task-specific formatter for averaged TabM predictions."""
     if task.task_type == TaskType.REGRESSION:
 
         def format_regression(member_logits: torch.Tensor, target: torch.Tensor) -> dict[str, Any]:
             predictions = member_logits.mean(dim=1)
-            return {"y_pred": predictions, "y": target, "mse": (predictions, target)}
+            metric_values = (predictions, target)
+            return {
+                "y_pred": predictions,
+                "y": target,
+                "mse": metric_values,
+                "rmse": metric_values,
+                "mae": metric_values,
+            }
 
         return format_regression
 
@@ -80,6 +90,48 @@ def make_ensemble_prediction_formatter(task: TaskSpec) -> PredictionFormatter:
     raise ValueError(f"unsupported TabM task type: {task.task_type.value}")
 
 
+def make_ensemble_prediction_output_formatter(task: TaskSpec) -> PredictionOutputFormatter:
+    """Compose targetless formatting for averaged TabM members."""
+    if task.task_type == TaskType.REGRESSION:
+        return lambda member_logits: {"y_pred": member_logits.mean(dim=1)}
+
+    if task.task_type == TaskType.BINARY_CLASSIFICATION:
+
+        def format_binary(member_logits: torch.Tensor) -> dict[str, torch.Tensor]:
+            probabilities = torch.sigmoid(member_logits).mean(dim=1)
+            return {
+                "probabilities": probabilities,
+                "labels": (probabilities >= 0.5).long(),
+            }
+
+        return format_binary
+
+    if task.task_type == TaskType.MULTICLASS_CLASSIFICATION:
+
+        def format_multiclass(member_logits: torch.Tensor) -> dict[str, torch.Tensor]:
+            probabilities = torch.softmax(member_logits, dim=-1).mean(dim=1)
+            return {
+                "probabilities": probabilities,
+                "labels": probabilities.argmax(dim=1),
+            }
+
+        return format_multiclass
+
+    raise ValueError(f"unsupported TabM task type: {task.task_type.value}")
+
+
+def create_prediction_step(*, task: TaskSpec, model: nn.Module):
+    """Compose targetless TabM prediction once for fitted-method inference."""
+    format_predictions = make_ensemble_prediction_output_formatter(task)
+
+    def prediction_step(features: torch.Tensor) -> dict[str, torch.Tensor]:
+        model.eval()
+        with torch.inference_mode():
+            return format_predictions(model(features.float()))
+
+    return prediction_step
+
+
 def create_training_step(
     *,
     task: TaskSpec,
@@ -90,7 +142,7 @@ def create_training_step(
     """Compose a training closure that optimizes each TabM member independently."""
     prepare_target = make_target_preparer(task.task_type)
     member_loss = make_ensemble_member_loss(task, loss_fn)
-    format_predictions = make_ensemble_prediction_formatter(task)
+    format_predictions = make_ensemble_train_evaluation_output_formatter(task)
 
     def training_step(batch: Any) -> dict[str, Any]:
         model.train()
@@ -119,7 +171,7 @@ def create_evaluation_step(
     """Compose an evaluation closure that averages TabM members for reporting."""
     prepare_target = make_target_preparer(task.task_type)
     member_loss = make_ensemble_member_loss(task, loss_fn)
-    format_predictions = make_ensemble_prediction_formatter(task)
+    format_predictions = make_ensemble_train_evaluation_output_formatter(task)
 
     def evaluation_step(batch: Any) -> dict[str, Any]:
         model.eval()

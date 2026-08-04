@@ -16,6 +16,7 @@ from rtml.methods.engines.task_adapters import (
 )
 from rtml.single_instance.methods._torch.tabm.steps import (
     create_evaluation_step,
+    create_prediction_step,
     create_training_step,
 )
 
@@ -56,6 +57,7 @@ def build_tabm_bundle(
             loss_fn=loss_fn,
         ),
         evaluation_step=create_evaluation_step(task=task, model=model, loss_fn=loss_fn),
+        prediction_step=create_prediction_step(task=task, model=model),
         train_metrics_factory=lambda: create_torch_metrics(
             task.task_type, [metric.name for metric in task.metrics]
         ),

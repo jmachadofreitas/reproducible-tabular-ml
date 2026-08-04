@@ -12,6 +12,7 @@ from rtml.methods.engines.metrics import Metrics
 
 CreateTrainingStep = Callable[[torch.optim.Optimizer], TrainingStep]
 MetricsFactory = Callable[[], Metrics]
+PredictionStep = Callable[[Any], Mapping[str, torch.Tensor]]
 
 
 class TorchModelBundle:
@@ -25,6 +26,7 @@ class TorchModelBundle:
         fit_config: TorchFitConfig,
         create_training_step: CreateTrainingStep,
         evaluation_step: EvaluationStep,
+        prediction_step: PredictionStep | None = None,
         train_metrics_factory: MetricsFactory | None = None,
         validation_metrics_factory: MetricsFactory | None = None,
         test_metrics_factory: MetricsFactory | None = None,
@@ -34,6 +36,7 @@ class TorchModelBundle:
         self.loss_fn = loss_fn
         self.fit_config = fit_config
         self.evaluation_step = evaluation_step
+        self.prediction_step = prediction_step
         self.metadata = dict(metadata or {})
         self._create_training_step = create_training_step
         self._train_metrics_factory = train_metrics_factory
@@ -46,6 +49,12 @@ class TorchModelBundle:
     def make_evaluation_step(self) -> EvaluationStep:
         """Return the model-specific evaluation callable."""
         return self.evaluation_step
+
+    def predict_batch(self, inputs: Any) -> Mapping[str, torch.Tensor]:
+        """Run model-owned targetless prediction for one prepared batch."""
+        if self.prediction_step is None:
+            raise NotImplementedError("this torch model bundle has no targetless prediction step")
+        return self.prediction_step(inputs)
 
     def make_train_metrics(self) -> Metrics:
         return Metrics() if self._train_metrics_factory is None else self._train_metrics_factory()

@@ -19,7 +19,8 @@ from rtml.core.tasks import MetricSpec, TaskType
 from rtml.methods.engines.metrics import IgniteMetric, Metrics
 
 PreparedTarget = Callable[[torch.Tensor], torch.Tensor]
-PredictionFormatter = Callable[[torch.Tensor, torch.Tensor], dict[str, Any]]
+TrainEvaluationOutputFormatter = Callable[[torch.Tensor, torch.Tensor], dict[str, Any]]
+PredictionOutputFormatter = Callable[[torch.Tensor], dict[str, torch.Tensor]]
 
 
 def require_supervised_target(case: BenchmarkCase) -> Any:
@@ -95,7 +96,9 @@ def make_target_preparer(task_type: TaskType) -> PreparedTarget:
     raise ValueError(f"unsupported torch task type: {task_type.value}")
 
 
-def make_prediction_formatter(task_type: TaskType) -> PredictionFormatter:
+def make_train_evaluation_output_formatter(
+    task_type: TaskType,
+) -> TrainEvaluationOutputFormatter:
     if task_type == TaskType.REGRESSION:
         return lambda logits, target: {
             "y_pred": logits,
@@ -131,6 +134,38 @@ def make_prediction_formatter(task_type: TaskType) -> PredictionFormatter:
                 "labels": labels,
                 "y": target,
                 "accuracy": (labels, target),
+            }
+
+        return format_multiclass
+
+    raise ValueError(f"unsupported torch task type: {task_type.value}")
+
+
+def make_prediction_output_formatter(task_type: TaskType) -> PredictionOutputFormatter:
+    """Create targetless output formatting for a standard torch model."""
+    if task_type == TaskType.REGRESSION:
+        return lambda logits: {"y_pred": logits}
+
+    if task_type == TaskType.BINARY_CLASSIFICATION:
+
+        def format_binary(logits: torch.Tensor) -> dict[str, torch.Tensor]:
+            probabilities = torch.sigmoid(logits)
+            return {
+                "logits": logits,
+                "probabilities": probabilities,
+                "labels": (probabilities >= 0.5).long(),
+            }
+
+        return format_binary
+
+    if task_type == TaskType.MULTICLASS_CLASSIFICATION:
+
+        def format_multiclass(logits: torch.Tensor) -> dict[str, torch.Tensor]:
+            probabilities = torch.softmax(logits, dim=1)
+            return {
+                "logits": logits,
+                "probabilities": probabilities,
+                "labels": probabilities.argmax(dim=1),
             }
 
         return format_multiclass
