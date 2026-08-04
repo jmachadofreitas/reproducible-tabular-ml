@@ -8,8 +8,8 @@ from torch import nn
 from rtml.core.tasks import TaskType
 from rtml.methods.engines.core import EvaluationStep, TrainingStep
 from rtml.methods.engines.task_adapters import (
-    make_prediction_formatter,
     make_target_preparer,
+    make_train_evaluation_output_formatter,
 )
 
 
@@ -22,7 +22,7 @@ def create_training_step(
 ) -> TrainingStep:
     """Compose a bag-level training closure once for one supervised task."""
     prepare_target = make_target_preparer(task_type)
-    format_predictions = make_prediction_formatter(task_type)
+    format_predictions = make_train_evaluation_output_formatter(task_type)
 
     def training_step(batch: Any) -> dict[str, Any]:
         model.train()
@@ -50,7 +50,7 @@ def create_evaluation_step(
 ) -> EvaluationStep:
     """Compose a bag-level evaluation closure once for one supervised task."""
     prepare_target = make_target_preparer(task_type)
-    format_predictions = make_prediction_formatter(task_type)
+    format_predictions = make_train_evaluation_output_formatter(task_type)
 
     def evaluation_step(batch: Any) -> dict[str, Any]:
         model.eval()
