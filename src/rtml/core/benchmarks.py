@@ -41,4 +41,9 @@ class BenchmarkSuite(Generic[DatasetT, TaskT]):
         if not self.name:
             raise ValueError("benchmark suite name must be non-empty")
         self.cases = list(self.cases)
+        if not self.cases:
+            raise ValueError("benchmark suite must contain at least one case")
+        case_names = [case.name for case in self.cases]
+        if len(case_names) != len(set(case_names)):
+            raise ValueError(f"benchmark case names must be unique: {case_names}")
         self.metadata = dict(self.metadata or {})
