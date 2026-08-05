@@ -10,8 +10,6 @@ from rtml.runs.execution import (
     RunExecutor,
     SequentialExecutor,
     run_method,
-    run_execution_plan_ray,
-    run_execution_plan_sequential,
     run_study,
     run_suite,
 )
@@ -21,8 +19,6 @@ __all__ = [
     "RunExecutor",
     "SequentialExecutor",
     "run_method",
-    "run_execution_plan_ray",
-    "run_execution_plan_sequential",
     "run_study",
     "run_suite",
 ]

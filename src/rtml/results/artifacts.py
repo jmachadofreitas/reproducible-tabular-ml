@@ -7,8 +7,8 @@ from typing import Any
 
 import numpy as np
 
-from rtml.core.results import PredictionSet
 from rtml.core.metrics import MetricRequest, compute_metrics
+from rtml.core.results import PredictionSet
 
 _ARRAY_FIELDS = ("sample_ids", "y_true", "labels", "probabilities", "scores", "values")
 

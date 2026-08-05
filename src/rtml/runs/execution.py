@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping, Sequence
 from contextlib import nullcontext
 from dataclasses import replace
-import os
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -19,14 +19,15 @@ from rtml.core.fingerprints import (
     fingerprint_task,
     stable_fingerprint,
 )
-from rtml.loggers import Logger
-from rtml.methods.backends.base import BackendResult, MethodBackend
 from rtml.core.methods import MethodSpec
 from rtml.core.results import PredictionSet
 from rtml.results.artifacts import save_prediction_set
 from rtml.core.runs import ExecutionPlan, ExecutionResources, RunRecord, RunResult, RunSpec
 from rtml.core.runtime import RuntimeSpec, capture_runtime
 from rtml.core.studies import Study
+from rtml.loggers import Logger
+from rtml.methods.backends.base import BackendResult, MethodBackend
+from rtml.results.artifacts import save_prediction_set
 
 
 def _backend_by_name(backends: Sequence[MethodBackend]) -> dict[str, MethodBackend]:
@@ -37,6 +38,13 @@ def _backend_by_name(backends: Sequence[MethodBackend]) -> dict[str, MethodBacke
     return backend_by_name
 
 
+def _validate_method_backend(method: MethodSpec, backend: MethodBackend) -> None:
+    if backend.name != method.model.backend:
+        raise ValueError(
+            f"method {method.name!r} requires backend {method.model.backend!r}, "
+            f"received {backend.name!r}"
+        )
+    backend.validate_method(method)
 def _logger_run_context(
     logger: Logger | None,
     *,
@@ -115,20 +123,6 @@ def _with_prediction_evidence(predictions: PredictionSet, record: RunRecord) -> 
             **prediction_evidence_metadata(record),
         },
     )
-
-
-def prediction_evidence_metadata(record: RunRecord) -> dict[str, Any]:
-    """Return run evidence metadata that should travel with saved predictions."""
-    return {
-        "run_id": record.run_id,
-        "case_name": record.case_name,
-        "dataset_fingerprint": record.dataset_fingerprint,
-        "task_fingerprint": record.task_fingerprint,
-        "resampling_plan_fingerprint": record.resampling_plan_fingerprint,
-        "method_fingerprint": record.method_fingerprint,
-        "runtime_fingerprint": record.runtime_fingerprint,
-        "seed": record.seed,
-    }
 
 
 def build_run_id(
@@ -278,20 +272,11 @@ def _run_method_in_context(
     metadata: Mapping[str, Any] | None = None,
     subgroup_columns: Sequence[str] | None = None,
 ) -> RunResult:
-    requested_backend = method.model.backend
-    backend_by_name = _backend_by_name(backends)
-    selected_backend = backend_by_name.get(requested_backend)
-    if selected_backend is None:
-        available_backends = ", ".join(backend_by_name) or "<none>"
-        raise ValueError(
-            f"no method backend named {requested_backend!r} "
-            f"for method {method.name!r}; available backends: {available_backends}"
-        )
-    selected_backend.validate_method(method)
+    _validate_method_backend(method, backend)
 
     # Backend execution owns fitting, predicting, and backend-level metrics.
     # Run execution owns stable IDs, artifact paths, and final logging.
-    backend_result = selected_backend.run(
+    backend_result = backend.run(
         case=case,
         method=method,
         resample_id=resample_id,
@@ -344,7 +329,7 @@ def run_method(
     *,
     case: BenchmarkCase,
     method: MethodSpec,
-    backends: Sequence[MethodBackend],
+    backend: MethodBackend,
     resample_id: str | None = None,
     seed: int = 0,
     runtime: RuntimeSpec | None = None,
@@ -364,7 +349,7 @@ def run_method(
         return _run_method_in_context(
             case=case,
             method=method,
-            backends=backends,
+            backend=backend,
             resample_id=resample_id,
             seed=seed,
             runtime=runtime,
@@ -406,31 +391,6 @@ def _log_results(results: Sequence[RunResult], logger: Logger | None) -> None:
             resample_id=result.record.resample_id,
         ):
             logger.log_run(result.record)
-
-
-def _attach_plan_metadata(
-    results: Sequence[RunResult],
-    plan_metadata: Mapping[str, Any],
-) -> list[RunResult]:
-    updated_results = []
-    for result in results:
-        # Plan metadata gives study/experiment context, method metadata gives
-        # reporting factors, and backend metadata gives observed execution info.
-        metadata = {
-            **result.record.metadata,
-            **result.record.method.metadata,
-            **dict(plan_metadata),
-        }
-        if metadata == result.record.metadata:
-            updated_results.append(result)
-            continue
-        updated_results.append(
-            replace(
-                result,
-                record=replace(result.record, metadata=metadata),
-            )
-        )
-    return updated_results
 
 
 def _execute_run_spec(
@@ -522,7 +482,6 @@ class SequentialExecutor:
                 _execute_run_spec(
                     run_spec,
                     prediction_dir,
-                    backends=backends,
                     continue_on_error=continue_on_error,
                     logger=logger,
                     metadata=_execution_metadata(
@@ -594,7 +553,7 @@ class RayExecutor:
                     run_spec.resample_id,
                     run_spec.seed,
                     run_spec.runtime,
-                    backends,
+                    backend_by_name.get(run_spec.method.model.backend),
                     prediction_dir,
                     continue_on_error,
                     self.worker_logger_config,
@@ -607,6 +566,7 @@ class RayExecutor:
             )
 
         raw_results = self._get_results(
+        results = self._get_results(
             ray,
             refs,
             show_progress=show_progress,
@@ -683,7 +643,7 @@ class RayExecutor:
         resample_id: str,
         seed: int,
         runtime: RuntimeSpec | None,
-        backends: Sequence[MethodBackend],
+        backend: MethodBackend | None,
         prediction_dir: str | Path | None,
         continue_on_error: bool,
         worker_logger_config: Mapping[str, Any],
@@ -700,7 +660,7 @@ class RayExecutor:
                 runtime=runtime,
             ),
             prediction_dir,
-            backends=backends,
+            backend=backend,
             continue_on_error=continue_on_error,
             logger=worker_logger,
             metadata=metadata,
@@ -813,50 +773,6 @@ def run_study(
         metadata=metadata,
     )
     return (executor or SequentialExecutor()).run(
-        plan,
-        backends=backends,
-        prediction_dir=prediction_dir,
-        logger=logger,
-        continue_on_error=continue_on_error,
-        show_progress=show_progress,
-        subgroup_columns=subgroup_columns,
-    )
-
-
-def run_execution_plan_sequential(
-    plan: ExecutionPlan,
-    *,
-    backends: Sequence[MethodBackend],
-    prediction_dir: str | Path | None = None,
-    logger: Logger | None = None,
-    continue_on_error: bool = False,
-    show_progress: bool = False,
-    subgroup_columns: Sequence[str] | None = None,
-) -> list[RunResult]:
-    """Execute an execution plan in-process."""
-    return SequentialExecutor().run(
-        plan,
-        backends=backends,
-        prediction_dir=prediction_dir,
-        logger=logger,
-        continue_on_error=continue_on_error,
-        show_progress=show_progress,
-        subgroup_columns=subgroup_columns,
-    )
-
-
-def run_execution_plan_ray(
-    plan: ExecutionPlan,
-    *,
-    backends: Sequence[MethodBackend],
-    prediction_dir: str | Path | None = None,
-    logger: Logger | None = None,
-    continue_on_error: bool = False,
-    show_progress: bool = False,
-    subgroup_columns: Sequence[str] | None = None,
-) -> list[RunResult]:
-    """Execute an execution plan with Ray, using each `RunSpec`'s resource hints."""
-    return RayExecutor().run(
         plan,
         backends=backends,
         prediction_dir=prediction_dir,
