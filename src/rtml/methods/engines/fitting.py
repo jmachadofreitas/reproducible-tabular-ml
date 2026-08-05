@@ -34,9 +34,16 @@ def fit_model_bundle(
 
     validation_evaluator = None
     if validation_dataloader is not None:
+        validation_metrics = bundle.make_validation_metrics()
+        if score_name not in validation_metrics.metrics:
+            available = ", ".join(validation_metrics.metrics) or "none"
+            raise ValueError(
+                f"torch validation objective {score_name!r} is not available; "
+                f"tracked validation metrics: {available}"
+            )
         validation_evaluator = Evaluator(
             bundle.evaluation_step,
-            metrics=bundle.make_validation_metrics(),
+            metrics=validation_metrics,
             device=device,
         )
 

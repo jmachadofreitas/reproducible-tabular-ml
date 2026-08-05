@@ -1,5 +1,5 @@
-from typing import Any, Mapping
 import math
+from typing import Any, Mapping
 
 
 class HPScheduler:

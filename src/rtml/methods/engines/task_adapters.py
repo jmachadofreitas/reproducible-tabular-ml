@@ -15,6 +15,7 @@ from ignite.metrics import (
 from torch import nn
 
 from rtml.core.benchmarks import BenchmarkCase
+from rtml.core.metrics import MetricRequest, metric_greater_is_better
 from rtml.core.tasks import MetricSpec, TaskType
 from rtml.methods.engines.metrics import IgniteMetric, Metrics
 
@@ -210,6 +211,6 @@ def resolve_score_name(
     raise ValueError("task must define at least one metric to build a trainer")
 
 
-def infer_score_mode(metric_name: str) -> str:
-    minimize_metrics = {"loss", "mse", "rmse", "mae", "mape", "log_loss", "brier"}
-    return "min" if metric_name.lower() in minimize_metrics else "max"
+def infer_score_mode(metric: MetricRequest | str) -> str:
+    """Return the checkpoint optimization mode for a task metric."""
+    return "max" if metric_greater_is_better(metric) else "min"

@@ -46,10 +46,6 @@ class TorchModelBundle:
     def create_training_step(self, optimizer: torch.optim.Optimizer) -> TrainingStep:
         return self._create_training_step(optimizer)
 
-    def make_evaluation_step(self) -> EvaluationStep:
-        """Return the model-specific evaluation callable."""
-        return self.evaluation_step
-
     def predict_batch(self, inputs: Any) -> Mapping[str, torch.Tensor]:
         """Run model-owned targetless prediction for one prepared batch."""
         if self.prediction_step is None:
