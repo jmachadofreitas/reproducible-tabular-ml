@@ -8,7 +8,6 @@ from rtml.core.tasks import MetricSpec, TaskSpec, TaskType
 from rtml.single_instance.datasets.sklearn_loaders import (
     build_sklearn_benchmark_case,
     build_sklearn_benchmark_suite,
-    build_sklearn_resampling_spec,
     load_breast_cancer_dataset,
     load_diabetes_dataset,
     load_iris_dataset,
@@ -16,6 +15,7 @@ from rtml.single_instance.datasets.sklearn_loaders import (
     load_sklearn_dataset,
     load_sklearn_regression_suite,
 )
+from rtml.single_instance.resampling import build_single_instance_resampling_plan
 
 
 def make_dataset() -> Dataset:
@@ -127,6 +127,14 @@ def test_dataset_select_rows_keeps_schema_and_metadata() -> None:
     assert selected.schema is dataset.schema
 
 
+def test_dataset_getitem_uses_positions_and_allows_repeats() -> None:
+    dataset = make_dataset()
+
+    selected = dataset[[2, 0, 2]]
+
+    assert selected["row_id"].tolist() == ["r3", "r1", "r3"]
+
+
 def test_task_spec_validates_roles_against_dataset() -> None:
     dataset = make_dataset()
     task = TaskSpec(
@@ -216,7 +224,7 @@ def test_generic_sklearn_loader_rejects_missing_values_during_schema_inference()
 
 def test_sklearn_benchmark_case_builder_materializes_resampling_plan() -> None:
     dataset, task = load_breast_cancer_dataset()
-    spec = build_sklearn_resampling_spec(
+    spec = ResamplingSpec(
         name="breast_cancer_stratified_cv",
         strategy=ResamplingStrategy.STRATIFIED_KFOLD,
         n_folds=3,
@@ -264,9 +272,78 @@ def test_sklearn_resampling_uses_row_positions() -> None:
     assert set(resample.train_idx).union(resample.test_idx) == set(range(len(dataset)))
 
 
+def test_single_instance_resampling_materializes_validation_rows() -> None:
+    dataset, task = load_breast_cancer_dataset()
+    spec = ResamplingSpec(
+        name="breast_cancer_stratified_cv",
+        strategy=ResamplingStrategy.STRATIFIED_KFOLD,
+        n_folds=3,
+        valid_size=0.2,
+        stratify="target",
+        shuffle=True,
+        seed=7,
+    )
+
+    plan = build_single_instance_resampling_plan(dataset=dataset, task=task, spec=spec)
+
+    for resample in plan.resamples:
+        assert resample.valid_idx is not None
+        train = set(resample.train_idx)
+        validation = set(resample.valid_idx)
+        test = set(resample.test_idx)
+        assert train.isdisjoint(validation)
+        assert train.isdisjoint(test)
+        assert validation.isdisjoint(test)
+        assert train | validation | test == set(range(len(dataset)))
+
+
+def test_single_instance_group_kfold_keeps_groups_isolated() -> None:
+    frame = pd.DataFrame(
+        {
+            "x": np.arange(8, dtype=float),
+            "target": [0, 1] * 4,
+            "subject": ["s1", "s1", "s2", "s2", "s3", "s3", "s4", "s4"],
+        }
+    )
+    dataset = Dataset(
+        name="grouped",
+        data=frame,
+        schema=FeatureSchema.infer(frame, group_columns=["subject"]),
+    )
+    task = TaskSpec(
+        name="grouped",
+        task_type=TaskType.BINARY_CLASSIFICATION,
+        source=["x"],
+        target="target",
+        groups=["subject"],
+        metrics=[MetricSpec("accuracy")],
+        primary_metric="accuracy",
+    )
+    spec = ResamplingSpec(
+        name="grouped_cv",
+        strategy=ResamplingStrategy.GROUP_KFOLD,
+        n_folds=4,
+        valid_size=0.25,
+        groups=["subject"],
+        seed=7,
+    )
+
+    plan = build_single_instance_resampling_plan(dataset=dataset, task=task, spec=spec)
+
+    assert len(plan.resamples) == 4
+    for resample in plan.resamples:
+        assert resample.valid_idx is not None
+        train_groups = set(frame.iloc[resample.train_idx]["subject"])
+        valid_groups = set(frame.iloc[resample.valid_idx]["subject"])
+        test_groups = set(frame.iloc[resample.test_idx]["subject"])
+        assert train_groups.isdisjoint(valid_groups)
+        assert train_groups.isdisjoint(test_groups)
+        assert valid_groups.isdisjoint(test_groups)
+
+
 def test_sklearn_benchmark_suite_builder_collects_cases() -> None:
     dataset, task = load_diabetes_dataset()
-    spec = build_sklearn_resampling_spec(
+    spec = ResamplingSpec(
         name="diabetes_kfold",
         strategy=ResamplingStrategy.KFOLD,
         n_folds=2,
@@ -287,6 +364,28 @@ def test_sklearn_benchmark_suite_builder_collects_cases() -> None:
 
     assert suite.name == "local_sklearn_suite"
     assert suite.cases == [benchmark_case]
+
+
+def test_sklearn_bootstrap_uses_out_of_bag_rows() -> None:
+    dataset, task = load_diabetes_dataset()
+    spec = ResamplingSpec(
+        name="diabetes_bootstrap",
+        strategy=ResamplingStrategy.BOOTSTRAP,
+        n_samples=3,
+        seed=17,
+    )
+
+    plan = build_single_instance_resampling_plan(dataset=dataset, task=task, spec=spec)
+
+    assert [resample.id for resample in plan.resamples] == [
+        "sample_00",
+        "sample_01",
+        "sample_02",
+    ]
+    for resample in plan.resamples:
+        assert len(resample.train_idx) == len(dataset)
+        assert len(resample.test_idx) > 0
+        assert set(resample.train_idx).isdisjoint(resample.test_idx)
 
 
 def test_load_sklearn_classification_suite_builds_default_suite() -> None:

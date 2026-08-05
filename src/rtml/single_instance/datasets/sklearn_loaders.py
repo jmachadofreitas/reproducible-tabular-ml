@@ -21,8 +21,9 @@ from sklearn.utils import Bunch
 
 from rtml.core.benchmarks import BenchmarkCase, BenchmarkSuite
 from rtml.core.datasets import Dataset, FeatureInfo, FeatureKind, FeatureSchema
-from rtml.core.resampling import Resample, ResamplingPlan, ResamplingSpec, ResamplingStrategy
+from rtml.core.resampling import ResamplingSpec, ResamplingStrategy
 from rtml.core.tasks import MetricSpec, TaskSpec, TaskType
+from rtml.single_instance.resampling import build_single_instance_resampling_plan
 
 SklearnLoader = Callable[..., Bunch]
 
@@ -353,133 +354,6 @@ def make_s_curve_regression_dataset(
     )
 
 
-def build_sklearn_resampling_spec(
-    *,
-    name: str,
-    strategy: ResamplingStrategy | str,
-    n_repeats: int = 1,
-    n_folds: int = 1,
-    n_samples: int = 1,
-    test_size: float | None = None,
-    valid_size: float | None = None,
-    shuffle: bool = False,
-    seed: int | None = None,
-    stratify: str | None = None,
-    groups: list[str] | None = None,
-    timestamp: str | None = None,
-    replacement: bool = True,
-    metadata: Mapping[str, Any] | None = None,
-) -> ResamplingSpec:
-    """Build a local sklearn resampling specification."""
-    return ResamplingSpec(
-        name=name,
-        strategy=ResamplingStrategy(strategy),
-        n_repeats=n_repeats,
-        n_folds=n_folds,
-        n_samples=n_samples,
-        test_size=test_size,
-        valid_size=valid_size,
-        shuffle=shuffle,
-        seed=seed,
-        stratify=stratify,
-        groups=list(groups or []),
-        timestamp=timestamp,
-        replacement=replacement,
-        metadata={"source": "sklearn", **dict(metadata or {})},
-    )
-
-
-def build_sklearn_resampling_plan(
-    *,
-    dataset: Dataset,
-    task: TaskSpec,
-    spec: ResamplingSpec,
-) -> ResamplingPlan:
-    """Materialize a saved resampling plan with sklearn split builders."""
-    task.validate_columns(dataset)
-
-    target = task.target_series(dataset)
-    if target is None:
-        raise ValueError("sklearn resampling requires a supervised task target")
-
-    row_indices = np.arange(len(dataset))
-    resamples: list[Resample] = []
-
-    if spec.strategy == ResamplingStrategy.HOLDOUT:
-        train_idx, test_idx = train_test_split(
-            row_indices,
-            test_size=spec.test_size,
-            shuffle=spec.shuffle,
-            random_state=spec.seed,
-        )
-        resamples.append(
-            Resample(
-                id="repeat_00",
-                train_idx=train_idx,
-                test_idx=test_idx,
-                metadata={"source": "sklearn"},
-            )
-        )
-    elif spec.strategy == ResamplingStrategy.STRATIFIED_HOLDOUT:
-        train_idx, test_idx = train_test_split(
-            row_indices,
-            test_size=spec.test_size,
-            shuffle=spec.shuffle,
-            random_state=spec.seed,
-            stratify=target.to_numpy(),
-        )
-        resamples.append(
-            Resample(
-                id="repeat_00",
-                train_idx=train_idx,
-                test_idx=test_idx,
-                metadata={"source": "sklearn"},
-            )
-        )
-    elif spec.strategy == ResamplingStrategy.KFOLD:
-        splitter = KFold(
-            n_splits=spec.n_folds,
-            shuffle=spec.shuffle,
-            random_state=spec.seed if spec.shuffle else None,
-        )
-        for fold, (train_pos, test_pos) in enumerate(splitter.split(dataset.data)):
-            resamples.append(
-                Resample(
-                    id=f"fold_{fold:02d}",
-                    train_idx=row_indices[train_pos],
-                    test_idx=row_indices[test_pos],
-                    metadata={"source": "sklearn", "fold": fold},
-                )
-            )
-    elif spec.strategy == ResamplingStrategy.STRATIFIED_KFOLD:
-        splitter = StratifiedKFold(
-            n_splits=spec.n_folds,
-            shuffle=spec.shuffle,
-            random_state=spec.seed if spec.shuffle else None,
-        )
-        for fold, (train_pos, test_pos) in enumerate(splitter.split(dataset.data, target)):
-            resamples.append(
-                Resample(
-                    id=f"fold_{fold:02d}",
-                    train_idx=row_indices[train_pos],
-                    test_idx=row_indices[test_pos],
-                    metadata={"source": "sklearn", "fold": fold},
-                )
-            )
-    else:
-        raise NotImplementedError(
-            f"sklearn resampling plan builder does not support {spec.strategy.value}"
-        )
-
-    return ResamplingPlan(
-        dataset_name=dataset.name,
-        task_name=task.name,
-        spec=spec,
-        resamples=resamples,
-        metadata={"source": "sklearn"},
-    )
-
-
 def build_sklearn_benchmark_case(
     *,
     name: str,
@@ -489,7 +363,11 @@ def build_sklearn_benchmark_case(
     metadata: Mapping[str, Any] | None = None,
 ) -> BenchmarkCase:
     """Create one runnable sklearn benchmark case."""
-    resampling = build_sklearn_resampling_plan(dataset=dataset, task=task, spec=resampling_spec)
+    resampling = build_single_instance_resampling_plan(
+        dataset=dataset,
+        task=task,
+        spec=resampling_spec,
+    )
     return BenchmarkCase(
         name=name,
         dataset=dataset,
@@ -515,13 +393,14 @@ def build_sklearn_benchmark_suite(
 
 def load_sklearn_classification_suite() -> BenchmarkSuite:
     """Create a small local sklearn classification suite."""
-    resampling_spec = build_sklearn_resampling_spec(
+    resampling_spec = ResamplingSpec(
         name="sklearn_classification_stratified_kfold",
         strategy=ResamplingStrategy.STRATIFIED_KFOLD,
         n_folds=5,
         stratify="target",
         shuffle=True,
         seed=42,
+        metadata={"source": "sklearn"},
     )
 
     cases: list[BenchmarkCase] = []
@@ -545,12 +424,13 @@ def load_sklearn_classification_suite() -> BenchmarkSuite:
 
 def load_sklearn_regression_suite() -> BenchmarkSuite:
     """Create a small local sklearn regression suite."""
-    resampling_spec = build_sklearn_resampling_spec(
+    resampling_spec = ResamplingSpec(
         name="sklearn_regression_kfold",
         strategy=ResamplingStrategy.KFOLD,
         n_folds=5,
         shuffle=True,
         seed=42,
+        metadata={"source": "sklearn"},
     )
 
     dataset_tasks = [
