@@ -25,10 +25,6 @@ def build_benchmark_suite(config: Mapping[str, Any] | None) -> BenchmarkSuite:
         return build_sklearn_benchmark_suite(config)
     if source == "openml":
         return build_openml_benchmark_suite(config)
-    if source in {"huggingface", "hf"}:
-        raise NotImplementedError("huggingface benchmark suites are not implemented yet")
-    if source == "local":
-        raise NotImplementedError("local benchmark suites are not implemented yet")
 
     raise ValueError(f"unsupported benchmark source {source!r}")
 
