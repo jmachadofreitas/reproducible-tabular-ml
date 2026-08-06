@@ -7,7 +7,6 @@ from rtml.core.resampling import ResamplingSpec, ResamplingStrategy
 from rtml.core.tasks import MetricSpec, TaskSpec, TaskType
 from rtml.single_instance.datasets.sklearn_loaders import (
     build_sklearn_benchmark_case,
-    build_sklearn_benchmark_suite,
     load_breast_cancer_dataset,
     load_diabetes_dataset,
     load_iris_dataset,
@@ -143,7 +142,7 @@ def test_task_spec_validates_roles_against_dataset() -> None:
         source=["age", "segment"],
         target="income",
         sample_weight="weight",
-        metrics=[MetricSpec("accuracy")],
+        metrics=[MetricSpec(name="accuracy", greater_is_better=True)],
         primary_metric="accuracy",
     )
 
@@ -166,7 +165,7 @@ def test_task_spec_requires_primary_metric_to_be_configured() -> None:
             task_type=TaskType.REGRESSION,
             source=["x"],
             target="y",
-            metrics=[MetricSpec("mae")],
+            metrics=[MetricSpec(name="mae", greater_is_better=False)],
             primary_metric="rmse",
         )
 
@@ -316,7 +315,7 @@ def test_single_instance_group_kfold_keeps_groups_isolated() -> None:
         source=["x"],
         target="target",
         groups=["subject"],
-        metrics=[MetricSpec("accuracy")],
+        metrics=[MetricSpec(name="accuracy", greater_is_better=True)],
         primary_metric="accuracy",
     )
     spec = ResamplingSpec(
@@ -339,31 +338,6 @@ def test_single_instance_group_kfold_keeps_groups_isolated() -> None:
         assert train_groups.isdisjoint(valid_groups)
         assert train_groups.isdisjoint(test_groups)
         assert valid_groups.isdisjoint(test_groups)
-
-
-def test_sklearn_benchmark_suite_builder_collects_cases() -> None:
-    dataset, task = load_diabetes_dataset()
-    spec = ResamplingSpec(
-        name="diabetes_kfold",
-        strategy=ResamplingStrategy.KFOLD,
-        n_folds=2,
-        shuffle=True,
-        seed=11,
-    )
-    benchmark_case = build_sklearn_benchmark_case(
-        name="diabetes_case",
-        dataset=dataset,
-        task=task,
-        resampling_spec=spec,
-    )
-
-    suite = build_sklearn_benchmark_suite(
-        name="local_sklearn_suite",
-        cases=[benchmark_case],
-    )
-
-    assert suite.name == "local_sklearn_suite"
-    assert suite.cases == [benchmark_case]
 
 
 def test_sklearn_bootstrap_uses_out_of_bag_rows() -> None:

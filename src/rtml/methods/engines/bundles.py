@@ -8,10 +8,10 @@ from torch import nn
 
 from rtml.methods.engines.config import TorchFitConfig
 from rtml.methods.engines.core import EvaluationStep, TrainingStep
-from rtml.methods.engines.metrics import Metrics
+from rtml.methods.engines.metrics import RunningMetrics
 
 CreateTrainingStep = Callable[[torch.optim.Optimizer], TrainingStep]
-MetricsFactory = Callable[[], Metrics]
+RunningMetricsFactory = Callable[[], RunningMetrics]
 PredictionStep = Callable[[Any], Mapping[str, torch.Tensor]]
 
 
@@ -27,9 +27,9 @@ class TorchModelBundle:
         create_training_step: CreateTrainingStep,
         evaluation_step: EvaluationStep,
         prediction_step: PredictionStep | None = None,
-        train_metrics_factory: MetricsFactory | None = None,
-        validation_metrics_factory: MetricsFactory | None = None,
-        test_metrics_factory: MetricsFactory | None = None,
+        train_metrics_factory: RunningMetricsFactory | None = None,
+        validation_metrics_factory: RunningMetricsFactory | None = None,
+        test_metrics_factory: RunningMetricsFactory | None = None,
         metadata: Mapping[str, Any] | None = None,
     ) -> None:
         self.model = model
@@ -52,13 +52,19 @@ class TorchModelBundle:
             raise NotImplementedError("this torch model bundle has no targetless prediction step")
         return self.prediction_step(inputs)
 
-    def make_train_metrics(self) -> Metrics:
-        return Metrics() if self._train_metrics_factory is None else self._train_metrics_factory()
+    def make_train_metrics(self) -> RunningMetrics:
+        return (
+            RunningMetrics()
+            if self._train_metrics_factory is None
+            else self._train_metrics_factory()
+        )
 
-    def make_validation_metrics(self) -> Metrics:
+    def make_validation_metrics(self) -> RunningMetrics:
         if self._validation_metrics_factory is None:
-            return Metrics()
+            return RunningMetrics()
         return self._validation_metrics_factory()
 
-    def make_test_metrics(self) -> Metrics:
-        return Metrics() if self._test_metrics_factory is None else self._test_metrics_factory()
+    def make_test_metrics(self) -> RunningMetrics:
+        return (
+            RunningMetrics() if self._test_metrics_factory is None else self._test_metrics_factory()
+        )

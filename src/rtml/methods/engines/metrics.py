@@ -6,7 +6,7 @@ from typing import Any, Protocol
 import torch
 
 
-class Metric(Protocol):
+class RunningMetric(Protocol):
     """Metric interface accepted by the torch engine metric collection."""
 
     def reset(self) -> None: ...
@@ -16,13 +16,17 @@ class Metric(Protocol):
     def compute(self) -> Any: ...
 
 
-class Metrics:
+class RunningMetrics:
     """Route named step outputs into reset/update/compute metric objects."""
 
-    def __init__(self, metrics: Mapping[str, Metric] | None = None, **kwargs: Metric) -> None:
+    def __init__(
+        self,
+        metrics: Mapping[str, RunningMetric] | None = None,
+        **kwargs: RunningMetric,
+    ) -> None:
         self.metrics = dict(metrics or {})
         self.metrics.update(kwargs)
-        self.update_called = False
+        self._updated: set[str] = set()
 
     def __bool__(self) -> bool:
         return bool(self.metrics)
@@ -30,10 +34,9 @@ class Metrics:
     def reset(self) -> None:
         for metric in self.metrics.values():
             metric.reset()
-        self.update_called = False
+        self._updated.clear()
 
     def update(self, **kwargs: Any) -> None:
-        updated = False
         for key, metric in self.metrics.items():
             value = kwargs.get(key)
             if value is None:
@@ -42,13 +45,14 @@ class Metrics:
                 metric.update(*value)
             else:
                 metric.update(value)
-            updated = True
-        self.update_called = updated or self.update_called
+            self._updated.add(key)
 
     def compute(self) -> dict[str, float]:
-        if not self.update_called:
-            return {}
-        return {name: _as_float(metric.compute()) for name, metric in self.metrics.items()}
+        return {
+            name: _as_float(self.metrics[name].compute())
+            for name in self.metrics
+            if name in self._updated
+        }
 
 
 class IgniteMetric:

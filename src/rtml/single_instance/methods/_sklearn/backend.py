@@ -18,7 +18,7 @@ from sklearn.pipeline import Pipeline
 
 from rtml.core.benchmarks import BenchmarkCase
 from rtml.core.methods import MethodSpec
-from rtml.core.metrics import compute_metrics
+from rtml.core.metrics import EvaluationMetrics
 from rtml.core.resampling import Resample
 from rtml.core.results import PredictionSet
 from rtml.core.runtime import RuntimeSpec

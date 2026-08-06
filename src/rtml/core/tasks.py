@@ -18,11 +18,14 @@ class TaskType(str, Enum):
 @dataclass
 class MetricSpec:
     name: str
+    greater_is_better: bool
     kwargs: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.name:
             raise ValueError("metric name must be non-empty")
+        if not isinstance(self.greater_is_better, bool):
+            raise TypeError("greater_is_better must be a bool")
         self.kwargs = dict(self.kwargs or {})
 
 

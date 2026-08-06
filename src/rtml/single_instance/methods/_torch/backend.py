@@ -10,12 +10,13 @@ from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader, TensorDataset
 
 from rtml.core.benchmarks import BenchmarkCase
-from rtml.core.methods import MethodSpec
-from rtml.core.metrics import compute_metrics
+from rtml.core.datasets import Dataset
+from rtml.core.methods import MethodSpec, ModelSpec
+from rtml.core.metrics import EvaluationMetrics
 from rtml.core.resampling import Resample
 from rtml.core.results import PredictionSet
 from rtml.core.runtime import RuntimeSpec
-from rtml.core.tasks import TaskSpec, TaskType
+from rtml.core.tasks import MetricSpec, TaskSpec, TaskType
 from rtml.loggers import Logger
 from rtml.methods.backends.base import BackendResult, MethodBackend
 from rtml.methods.engines.bundles import TorchModelBundle
@@ -31,7 +32,7 @@ from rtml.methods.engines.runtime import resolve_device, seed_torch
 from rtml.methods.engines.task_adapters import (
     infer_score_mode,
     require_supervised_target,
-    resolve_score_name,
+    resolve_score_metric,
     target_tensors,
 )
 from rtml.single_instance.methods._torch.data import (
@@ -39,8 +40,9 @@ from rtml.single_instance.methods._torch.data import (
     TensorDatasetBundle,
     as_float32_array,
 )
-from rtml.single_instance.methods._torch.outputs import build_prediction_set
+from rtml.single_instance.methods._torch.fitted import TorchFittedMethod
 from rtml.single_instance.methods._torch.mlp.factory import build_mlp_bundle
+from rtml.single_instance.methods._torch.outputs import build_prediction_set
 from rtml.single_instance.methods._torch.tabm.factory import build_tabm_bundle
 from rtml.single_instance.preprocessing import build_preprocessor
 
@@ -135,14 +137,17 @@ class TorchBackend(MethodBackend):
             bundle=bundle,
             generator=generator,
         )
-        score_name = resolve_score_name(case.task.primary_metric, case.task.metrics)
-        score_mode = infer_score_mode(score_name)
+        score_metric: MetricSpec = resolve_score_metric(
+            case.task.primary_metric,
+            case.task.metrics,
+        )
+        score_mode = infer_score_mode(score_metric)
         trainer = fit_model_bundle(
             bundle,
             loaders.train,
             validation_dataloader=loaders.validation,
             test_dataloader=loaders.test,
-            score_name=score_name,
+            score_name=score_metric.name,
             score_mode=score_mode,
             device=device,
             logger=logger,
@@ -171,7 +176,7 @@ class TorchBackend(MethodBackend):
 
         return BackendResult(
             predictions=predictions,
-            metrics=compute_metrics(case.task.metrics, predictions),
+            metrics=EvaluationMetrics(case.task.metrics).compute(predictions),
             fit_time=fit_time,
             predict_time=predict_time,
             metadata=self._metadata(bundle=bundle, policy=policy, device=device, trainer=trainer),

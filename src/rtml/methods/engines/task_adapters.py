@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from collections.abc import Callable, Sequence
 from typing import Any
 
@@ -15,9 +13,8 @@ from ignite.metrics import (
 from torch import nn
 
 from rtml.core.benchmarks import BenchmarkCase
-from rtml.core.metrics import MetricRequest, metric_greater_is_better
 from rtml.core.tasks import MetricSpec, TaskType
-from rtml.methods.engines.metrics import IgniteMetric, Metrics
+from rtml.methods.engines.metrics import IgniteMetric, RunningMetrics
 
 PreparedTarget = Callable[[torch.Tensor], torch.Tensor]
 TrainEvaluationOutputFormatter = Callable[[torch.Tensor, torch.Tensor], dict[str, Any]]
@@ -59,7 +56,10 @@ def target_tensors(
             torch.as_tensor(y_eval.to_numpy(dtype=np.float32)).reshape(-1, 1),
             None,
         )
-    if task_type in {TaskType.BINARY_CLASSIFICATION, TaskType.MULTICLASS_CLASSIFICATION}:
+    if task_type in {
+        TaskType.BINARY_CLASSIFICATION,
+        TaskType.MULTICLASS_CLASSIFICATION,
+    }:
         train_encoded, eval_encoded, classes = encode_classification_target(y_train, y_eval)
         if task_type == TaskType.BINARY_CLASSIFICATION and len(classes) != 2:
             raise ValueError(
@@ -177,7 +177,7 @@ def make_prediction_output_formatter(task_type: TaskType) -> PredictionOutputFor
 def create_torch_metrics(
     task_type: TaskType,
     metric_names: Sequence[str] = (),
-) -> Metrics:
+) -> RunningMetrics:
     requested = set(metric_names)
     if task_type == TaskType.REGRESSION:
         if not requested:
@@ -191,26 +191,33 @@ def create_torch_metrics(
         metrics.update(
             {name: IgniteMetric(available[name]()) for name in requested if name in available}
         )
-        return Metrics(metrics)
-    if task_type in {TaskType.BINARY_CLASSIFICATION, TaskType.MULTICLASS_CLASSIFICATION}:
+        return RunningMetrics(metrics)
+    if task_type in {
+        TaskType.BINARY_CLASSIFICATION,
+        TaskType.MULTICLASS_CLASSIFICATION,
+    }:
         metrics = {"loss": IgniteMetric(Average())}
         if not requested or "accuracy" in requested:
             metrics["accuracy"] = IgniteMetric(Accuracy())
-        return Metrics(metrics)
+        return RunningMetrics(metrics)
     raise ValueError(f"unsupported torch task type: {task_type.value}")
 
 
-def resolve_score_name(
+def resolve_score_metric(
     primary_metric: str | None,
     metrics: Sequence[MetricSpec],
-) -> str:
-    if primary_metric is not None:
-        return primary_metric
-    if metrics:
-        return metrics[0].name
-    raise ValueError("task must define at least one metric to build a trainer")
+) -> MetricSpec:
+    """Return the metric used for checkpoint selection and early stopping."""
+    if not metrics:
+        raise ValueError("task must define at least one metric to build a trainer")
+    if primary_metric is None:
+        return metrics[0]
+    for metric in metrics:
+        if metric.name == primary_metric:
+            return metric
+    raise ValueError(f"primary metric {primary_metric!r} is not present in task metrics")
 
 
-def infer_score_mode(metric: MetricRequest | str) -> str:
+def infer_score_mode(metric: MetricSpec) -> str:
     """Return the checkpoint optimization mode for a task metric."""
-    return "max" if metric_greater_is_better(metric) else "min"
+    return "max" if metric.greater_is_better else "min"

@@ -1,18 +1,18 @@
-from __future__ import annotations
-
 from collections.abc import Callable, Iterable, Mapping
-from typing import Any, Protocol
+from typing import Any
 
 import numpy as np
-from sklearn.metrics import accuracy_score, log_loss, mean_absolute_error, roc_auc_score
+from sklearn.metrics import (
+    accuracy_score,
+    log_loss,
+    mean_absolute_error,
+    mean_squared_error,
+    roc_auc_score,
+    root_mean_squared_error,
+)
 
 from rtml.core.results import PredictionSet
-
-
-class MetricRequest(Protocol):
-    name: str
-    kwargs: dict[str, Any]
-
+from rtml.core.tasks import MetricSpec
 
 MetricFunction = Callable[[PredictionSet, Mapping[str, Any]], float]
 
@@ -48,7 +48,7 @@ def _binary_or_matrix_probabilities(predictions: PredictionSet) -> np.ndarray:
     return probabilities
 
 
-def compute_accuracy(predictions: PredictionSet, kwargs: Mapping[str, Any]) -> float:
+def _compute_accuracy(predictions: PredictionSet, kwargs: Mapping[str, Any]) -> float:
     return float(
         accuracy_score(
             _require_y_true(predictions), _require_labels(predictions, "accuracy"), **kwargs
@@ -56,7 +56,7 @@ def compute_accuracy(predictions: PredictionSet, kwargs: Mapping[str, Any]) -> f
     )
 
 
-def compute_roc_auc(predictions: PredictionSet, kwargs: Mapping[str, Any]) -> float:
+def _compute_roc_auc(predictions: PredictionSet, kwargs: Mapping[str, Any]) -> float:
     options = dict(kwargs)
     probabilities = _binary_or_matrix_probabilities(predictions)
     if probabilities.ndim == 2:
@@ -64,7 +64,7 @@ def compute_roc_auc(predictions: PredictionSet, kwargs: Mapping[str, Any]) -> fl
     return float(roc_auc_score(_require_y_true(predictions), probabilities, **options))
 
 
-def compute_log_loss(predictions: PredictionSet, kwargs: Mapping[str, Any]) -> float:
+def _compute_log_loss(predictions: PredictionSet, kwargs: Mapping[str, Any]) -> float:
     return float(
         log_loss(
             _require_y_true(predictions),
@@ -74,20 +74,27 @@ def compute_log_loss(predictions: PredictionSet, kwargs: Mapping[str, Any]) -> f
     )
 
 
-def compute_mse(predictions: PredictionSet, kwargs: Mapping[str, Any]) -> float:
-    residuals = _require_y_true(predictions) - _require_values(predictions, "mse")
-    if kwargs:
-        raise TypeError("mse does not currently support metric kwargs")
-    return float(np.mean(np.square(residuals)))
+def _compute_mse(predictions: PredictionSet, kwargs: Mapping[str, Any]) -> float:
+    return float(
+        mean_squared_error(
+            _require_y_true(predictions),
+            _require_values(predictions, "mse"),
+            **kwargs,
+        )
+    )
 
 
-def compute_rmse(predictions: PredictionSet, kwargs: Mapping[str, Any]) -> float:
-    if kwargs:
-        raise TypeError("rmse does not currently support metric kwargs")
-    return float(np.sqrt(compute_mse(predictions, {})))
+def _compute_rmse(predictions: PredictionSet, kwargs: Mapping[str, Any]) -> float:
+    return float(
+        root_mean_squared_error(
+            _require_y_true(predictions),
+            _require_values(predictions, "rmse"),
+            **kwargs,
+        )
+    )
 
 
-def compute_mae(predictions: PredictionSet, kwargs: Mapping[str, Any]) -> float:
+def _compute_mae(predictions: PredictionSet, kwargs: Mapping[str, Any]) -> float:
     return float(
         mean_absolute_error(
             _require_y_true(predictions),
@@ -97,31 +104,32 @@ def compute_mae(predictions: PredictionSet, kwargs: Mapping[str, Any]) -> float:
     )
 
 
-METRIC_REGISTRY: dict[str, MetricFunction] = {
-    "accuracy": compute_accuracy,
-    "roc_auc": compute_roc_auc,
-    "log_loss": compute_log_loss,
-    "mse": compute_mse,
-    "rmse": compute_rmse,
-    "mae": compute_mae,
+_METRIC_FUNCTIONS: dict[str, MetricFunction] = {
+    "accuracy": _compute_accuracy,
+    "roc_auc": _compute_roc_auc,
+    "log_loss": _compute_log_loss,
+    "mse": _compute_mse,
+    "rmse": _compute_rmse,
+    "mae": _compute_mae,
 }
 
 
-def get_metric_function(name: str) -> MetricFunction:
-    try:
-        return METRIC_REGISTRY[name]
-    except KeyError as exc:
-        known = ", ".join(sorted(METRIC_REGISTRY))
-        raise KeyError(f"unknown metric {name!r}; known metrics: {known}") from exc
+class EvaluationMetrics:
+    """Compute the requested final metrics from complete predictions."""
 
+    def __init__(self, metrics: Iterable[MetricSpec]) -> None:
+        self.metrics = list(metrics)
 
-def compute_metric(metric: MetricRequest, predictions: PredictionSet) -> float:
-    metric_fn = get_metric_function(metric.name)
-    return metric_fn(predictions, dict(metric.kwargs))
+    def compute(self, predictions: PredictionSet) -> dict[str, float]:
+        return {metric.name: self.compute_metric(metric, predictions) for metric in self.metrics}
 
-
-def compute_metrics(
-    metrics: Iterable[MetricRequest],
-    predictions: PredictionSet,
-) -> dict[str, float]:
-    return {metric.name: compute_metric(metric, predictions) for metric in metrics}
+    @staticmethod
+    def compute_metric(metric: MetricSpec, predictions: PredictionSet) -> float:
+        try:
+            metric_function = _METRIC_FUNCTIONS[metric.name]
+        except KeyError as ex:
+            known = ", ".join(sorted(_METRIC_FUNCTIONS))
+            raise KeyError(
+                f"unknown evaluation metric {metric.name!r}; known metrics: {known}"
+            ) from ex
+        return metric_function(predictions, metric.kwargs)

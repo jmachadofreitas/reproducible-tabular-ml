@@ -2,8 +2,8 @@ import pandas as pd
 import pytest
 
 from rtml.core.datasets import Dataset, FeatureInfo, FeatureKind, FeatureSchema, FeatureTag
-from rtml.single_instance.preprocessing import build_preprocessor
 from rtml.core.tasks import MetricSpec, TaskSpec, TaskType
+from rtml.single_instance.preprocessing import build_preprocessor
 
 
 def make_mixed_dataset() -> tuple[Dataset, TaskSpec]:
@@ -31,7 +31,7 @@ def make_mixed_dataset() -> tuple[Dataset, TaskSpec]:
         task_type=TaskType.BINARY_CLASSIFICATION,
         source=["num", "cat"],
         target="target",
-        metrics=[MetricSpec("accuracy")],
+        metrics=[MetricSpec(name="accuracy", greater_is_better=True)],
         primary_metric="accuracy",
     )
     return dataset, task
@@ -89,7 +89,7 @@ def make_tagged_policy_dataset() -> tuple[Dataset, TaskSpec]:
             "wide_cat",
         ],
         target="target",
-        metrics=[MetricSpec("accuracy")],
+        metrics=[MetricSpec(name="accuracy", greater_is_better=True)],
         primary_metric="accuracy",
     )
     return dataset, task

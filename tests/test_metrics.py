@@ -1,20 +1,8 @@
-from dataclasses import dataclass, field
-from typing import Any
-
 import pytest
 
+from rtml.core.metrics import EvaluationMetrics
 from rtml.core.results import PredictionSet
-from rtml.core.metrics import METRIC_REGISTRY, compute_metrics, get_metric_function
-
-
-@dataclass(frozen=True)
-class MetricRequest:
-    name: str
-    kwargs: dict[str, Any] = field(default_factory=dict)
-
-
-def test_metric_registry_exposes_backend_neutral_prediction_metrics() -> None:
-    assert {"accuracy", "roc_auc", "log_loss", "mse", "rmse", "mae"}.issubset(METRIC_REGISTRY)
+from rtml.core.tasks import MetricSpec
 
 
 def test_compute_metrics_uses_prediction_set_without_backend_objects() -> None:
@@ -34,14 +22,34 @@ def test_compute_metrics_uses_prediction_set_without_backend_objects() -> None:
         ],
     )
 
-    metrics = compute_metrics(
-        [MetricRequest("accuracy"), MetricRequest("roc_auc"), MetricRequest("log_loss")],  # type: ignore
-        predictions,
-    )
+    metrics = EvaluationMetrics(
+        [
+            MetricSpec(name="accuracy", greater_is_better=True),
+            MetricSpec(name="roc_auc", greater_is_better=True),
+            MetricSpec(name="log_loss", greater_is_better=False),
+        ]
+    ).compute(predictions)
 
     assert metrics["accuracy"] == 0.75
     assert metrics["roc_auc"] == 1.0
     assert metrics["log_loss"] > 0.0
+
+
+def test_evaluation_metrics_only_computes_requested_metrics() -> None:
+    predictions = PredictionSet(
+        dataset_name="toy",
+        task_name="binary",
+        method_name="method",
+        resample_id="fold_00",
+        sample_ids=[0, 1],
+        y_true=[0, 1],
+        labels=[0, 1],
+    )
+
+    assert EvaluationMetrics([MetricSpec(name="accuracy", greater_is_better=True)]).compute(
+        predictions
+    ) == {"accuracy": 1.0}
+    assert EvaluationMetrics([]).compute(predictions) == {}
 
 
 def test_regression_metrics_have_expected_values() -> None:
@@ -55,10 +63,13 @@ def test_regression_metrics_have_expected_values() -> None:
         values=[1.0, 4.0, 7.0],
     )
 
-    metrics = compute_metrics(
-        [MetricRequest("mse"), MetricRequest("rmse"), MetricRequest("mae")],
-        predictions,
-    )
+    metrics = EvaluationMetrics(
+        [
+            MetricSpec(name="mse", greater_is_better=False),
+            MetricSpec(name="rmse", greater_is_better=False),
+            MetricSpec(name="mae", greater_is_better=False),
+        ]
+    ).compute(predictions)
 
     assert metrics["mse"] == pytest.approx(13.0 / 3.0)
     assert metrics["rmse"] == pytest.approx((13.0 / 3.0) ** 0.5)
@@ -67,4 +78,17 @@ def test_regression_metrics_have_expected_values() -> None:
 
 def test_unknown_metric_reports_known_names() -> None:
     with pytest.raises(KeyError, match="accuracy"):
-        get_metric_function("not_a_metric")
+        EvaluationMetrics([MetricSpec(name="not_a_metric", greater_is_better=True)]).compute(
+            PredictionSet(
+                dataset_name="toy",
+                task_name="task",
+                method_name="method",
+                resample_id="fold_00",
+                sample_ids=[],
+            )
+        )
+
+
+def test_metric_direction_must_be_boolean() -> None:
+    with pytest.raises(TypeError, match="greater_is_better"):
+        MetricSpec(name="accuracy", greater_is_better="yes")  # type: ignore[arg-type]

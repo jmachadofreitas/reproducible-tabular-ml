@@ -11,7 +11,7 @@ from torch.utils.data import DataLoader
 
 from rtml.loggers import Logger
 from rtml.methods.engines.checkpointing import CheckpointManager
-from rtml.methods.engines.metrics import Metrics
+from rtml.methods.engines.metrics import RunningMetrics
 
 Batch = Any
 BatchPreparer = Callable[[Batch, torch.device | str | None], Batch]
@@ -46,7 +46,7 @@ class Evaluator(Engine):
         self,
         evaluation_step: EvaluationStep,
         *,
-        metrics: Metrics | None = None,
+        metrics: RunningMetrics | None = None,
         prepare_batch: BatchPreparer = default_prepare_batch,
         device: torch.device | str | None = None,
         name: str | None = None,
@@ -55,7 +55,7 @@ class Evaluator(Engine):
         self.prepare_batch = prepare_batch
         self.device = device
         self.name = name
-        self.metrics = metrics or Metrics()
+        self.metrics = metrics or RunningMetrics()
         self.outputs: list[dict[str, Any]] = []
 
         def _process_function(engine: Engine, batch: Batch) -> dict[str, Any]:
@@ -115,7 +115,7 @@ class Trainer(Engine):
         self,
         training_step: TrainingStep,
         *,
-        train_metrics: Metrics | None = None,
+        train_metrics: RunningMetrics | None = None,
         lr_scheduler: Any | None = None,
         hp_scheduler: Any | None = None,
         val_evaluator: Evaluator | None = None,
@@ -131,7 +131,7 @@ class Trainer(Engine):
         checkpoint_manager: CheckpointManager | None = None,
     ) -> None:
         self.training_step = training_step
-        self.train_metrics = train_metrics or Metrics()
+        self.train_metrics = train_metrics or RunningMetrics()
         self.lr_scheduler = lr_scheduler
         self.hp_scheduler = hp_scheduler
         self.val_evaluator = val_evaluator

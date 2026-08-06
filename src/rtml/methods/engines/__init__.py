@@ -10,7 +10,7 @@ from rtml.methods.engines.core import (
     TrainingStep,
 )
 from rtml.methods.engines.fitting import fit_model_bundle
-from rtml.methods.engines.metrics import IgniteMetric, Metric, Metrics
+from rtml.methods.engines.metrics import IgniteMetric, RunningMetric, RunningMetrics
 from rtml.methods.engines.optim import (
     create_hp_scheduler,
     create_lr_scheduler,
@@ -22,8 +22,8 @@ __all__ = [
     "EvaluationStep",
     "Evaluator",
     "IgniteMetric",
-    "Metric",
-    "Metrics",
+    "RunningMetric",
+    "RunningMetrics",
     "TorchFitConfig",
     "TorchModelBundle",
     "TrainingStep",

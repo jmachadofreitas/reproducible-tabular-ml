@@ -8,11 +8,11 @@ from torch.utils.data import DataLoader
 
 from rtml.core.benchmarks import BenchmarkCase
 from rtml.core.methods import MethodSpec
-from rtml.core.metrics import compute_metrics
+from rtml.core.metrics import EvaluationMetrics
 from rtml.core.resampling import Resample
 from rtml.core.results import PredictionSet
 from rtml.core.runtime import RuntimeSpec
-from rtml.core.tasks import TaskType
+from rtml.core.tasks import MetricSpec, TaskType
 from rtml.loggers import Logger
 from rtml.methods.backends.base import BackendResult, MethodBackend
 from rtml.methods.engines.bundles import TorchModelBundle
@@ -27,7 +27,7 @@ from rtml.methods.engines.fitting import fit_model_bundle
 from rtml.methods.engines.runtime import resolve_device, seed_torch
 from rtml.methods.engines.task_adapters import (
     infer_score_mode,
-    resolve_score_name,
+    resolve_score_metric,
     target_tensors,
 )
 from rtml.multi_instance.datasets.base import MultiInstanceDataset
@@ -132,14 +132,14 @@ class MultiInstanceTorchBackend(MethodBackend):
             device=device,
         )
         loaders = self._build_loaders(data, bundle, generator=generator)
-        score_name = resolve_score_name(task.primary_metric, task.metrics)
-        score_mode = infer_score_mode(score_name)
+        score_metric: MetricSpec = resolve_score_metric(task.primary_metric, task.metrics)
+        score_mode = infer_score_mode(score_metric)
         trainer = fit_model_bundle(
             bundle,
             loaders.train,
             validation_dataloader=loaders.validation,
             test_dataloader=loaders.test,
-            score_name=score_name,
+            score_name=score_metric.name,
             score_mode=score_mode,
             device=device,
             logger=logger,
@@ -167,7 +167,7 @@ class MultiInstanceTorchBackend(MethodBackend):
         predict_time = perf_counter() - predict_start
         return BackendResult(
             predictions=predictions,
-            metrics=compute_metrics(task.metrics, predictions),
+            metrics=EvaluationMetrics(task.metrics).compute(predictions),
             fit_time=fit_time,
             predict_time=predict_time,
             metadata=self._metadata(
