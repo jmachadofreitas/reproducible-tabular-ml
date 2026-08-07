@@ -137,6 +137,7 @@ class RunRecord:
     runtime: RuntimeSpec
     runtime_fingerprint: str
     status: Literal["success", "failed"]
+    primary_metric_greater_is_better: bool | None = None
     metrics: dict[str, float] = field(default_factory=dict)
     fit_time: float | None = None
     predict_time: float | None = None

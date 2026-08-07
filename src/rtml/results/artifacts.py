@@ -7,8 +7,9 @@ from typing import Any
 
 import numpy as np
 
-from rtml.core.metrics import MetricRequest, compute_metrics
+from rtml.core.metrics import EvaluationMetrics
 from rtml.core.results import PredictionSet
+from rtml.core.tasks import MetricSpec
 
 _ARRAY_FIELDS = ("sample_ids", "y_true", "labels", "probabilities", "scores", "values")
 
@@ -88,7 +89,7 @@ def load_prediction_set(path: str | Path) -> PredictionSet:
 
 def recompute_metrics_from_prediction_path(
     path: str | Path,
-    metrics: Iterable[MetricRequest],
+    metrics: Iterable[MetricSpec],
 ) -> dict[str, float]:
     """Recompute metrics from a saved PredictionSet artifact."""
-    return compute_metrics(metrics, load_prediction_set(path))
+    return EvaluationMetrics(metrics).compute(load_prediction_set(path))

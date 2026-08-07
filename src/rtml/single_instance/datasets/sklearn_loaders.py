@@ -168,7 +168,10 @@ def load_breast_cancer_dataset() -> tuple[Dataset, TaskSpec]:
         name="breast_cancer",
         dataset=dataset,
         task_type=TaskType.BINARY_CLASSIFICATION,
-        metrics=[MetricSpec("accuracy"), MetricSpec("roc_auc")],
+        metrics=[
+            MetricSpec(name="accuracy", greater_is_better=True),
+            MetricSpec(name="roc_auc", greater_is_better=True),
+        ],
         primary_metric="accuracy",
     )
     return dataset, task
@@ -184,7 +187,7 @@ def load_iris_dataset() -> tuple[Dataset, TaskSpec]:
         name="iris",
         dataset=dataset,
         task_type=TaskType.MULTICLASS_CLASSIFICATION,
-        metrics=[MetricSpec("accuracy")],
+        metrics=[MetricSpec(name="accuracy", greater_is_better=True)],
         primary_metric="accuracy",
     )
     return dataset, task
@@ -200,7 +203,7 @@ def load_wine_dataset() -> tuple[Dataset, TaskSpec]:
         name="wine",
         dataset=dataset,
         task_type=TaskType.MULTICLASS_CLASSIFICATION,
-        metrics=[MetricSpec("accuracy")],
+        metrics=[MetricSpec(name="accuracy", greater_is_better=True)],
         primary_metric="accuracy",
     )
     return dataset, task
@@ -216,7 +219,10 @@ def load_diabetes_dataset() -> tuple[Dataset, TaskSpec]:
         name="diabetes",
         dataset=dataset,
         task_type=TaskType.REGRESSION,
-        metrics=[MetricSpec("rmse"), MetricSpec("mae")],
+        metrics=[
+            MetricSpec(name="rmse", greater_is_better=False),
+            MetricSpec(name="mae", greater_is_better=False),
+        ],
         primary_metric="rmse",
     )
     return dataset, task
@@ -254,7 +260,10 @@ def _make_numeric_regression_dataset(
         name=name,
         dataset=dataset,
         task_type=TaskType.REGRESSION,
-        metrics=[MetricSpec("rmse"), MetricSpec("mae")],
+        metrics=[
+            MetricSpec(name="rmse", greater_is_better=False),
+            MetricSpec(name="mae", greater_is_better=False),
+        ],
         primary_metric="rmse",
     )
     return dataset, task

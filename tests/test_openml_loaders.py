@@ -79,7 +79,8 @@ def test_load_openml_benchmark_case_builds_dataset_task_and_resampling(monkeypat
     assert benchmark_case.dataset.schema.get("workclass").kind == FeatureKind.CATEGORICAL
     assert benchmark_case.dataset.schema.get("income").kind == FeatureKind.BINARY
     assert benchmark_case.task.task_type == TaskType.BINARY_CLASSIFICATION
-    assert benchmark_case.task.primary_metric == "area_under_roc_curve"
+    assert benchmark_case.task.source == ["age", "workclass"]
+    assert benchmark_case.task.primary_metric == "roc_auc"
     assert benchmark_case.resampling.spec.strategy == ResamplingStrategy.UNKNOWN_OPENML_TASK
     assert benchmark_case.resampling.spec.n_folds == 2
     assert benchmark_case.resampling.metadata["default_split"] == DEFAULT_OPENML_SPLIT

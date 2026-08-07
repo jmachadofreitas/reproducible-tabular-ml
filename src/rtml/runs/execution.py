@@ -153,6 +153,16 @@ def build_run_id(
     return f"{case_name}:{method_name}:{resample_id}:{seed}:sha256:{digest}"
 
 
+def _primary_metric_direction(case: BenchmarkCase) -> bool | None:
+    primary_metric = case.task.primary_metric
+    if primary_metric is None:
+        return None
+    for metric in case.task.metrics:
+        if metric.name == primary_metric:
+            return metric.greater_is_better
+    raise ValueError(f"primary metric {primary_metric!r} is not present in task metrics")
+
+
 def build_run_record(
     *,
     case: BenchmarkCase,

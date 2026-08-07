@@ -228,7 +228,10 @@ def load_popstats_dataset(
         task_type=TaskType.REGRESSION,
         instance_source=dataset.select_instance_features(kinds=[FeatureKind.NUMERIC]),
         target=TARGET_COLUMN,
-        metrics=[MetricSpec("rmse"), MetricSpec("mae")],
+        metrics=[
+            MetricSpec(name="rmse", greater_is_better=False),
+            MetricSpec(name="mae", greater_is_better=False),
+        ],
         primary_metric="rmse",
         metadata={
             "source": "popstats",

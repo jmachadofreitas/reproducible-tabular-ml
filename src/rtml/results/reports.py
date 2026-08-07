@@ -7,6 +7,8 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeAlias
 
+from rtml.results._values import boolean_value, finite_number
+
 if TYPE_CHECKING:
     from rtml.core.runs import RunRecord, RunResult
 
@@ -23,7 +25,6 @@ DEFAULT_RANK_GROUP_BY = ("metadata.study_name", "case_name", "dataset_name", "ta
 DEFAULT_OVERALL_RANK_GROUP_BY = ("metadata.study_name",)
 DEFAULT_METHOD_FIELD = "method_name"
 DEFAULT_TIMING_FIELDS = ("fit_time", "predict_time")
-LOWER_IS_BETTER_METRICS = frozenset({"log_loss", "mse", "rmse", "mae"})
 
 
 def run_record_row(record: RunRecord) -> Row:
@@ -46,6 +47,7 @@ def run_record_row(record: RunRecord) -> Row:
         "runtime_fingerprint": record.runtime_fingerprint,
         "status": record.status,
         "primary_metric": record.primary_metric or "",
+        "primary_metric_greater_is_better": record.primary_metric_greater_is_better,
         "fit_time": record.fit_time,
         "predict_time": record.predict_time,
         "prediction_path": record.prediction_path or "",
@@ -323,23 +325,25 @@ def _add_primary_metric_ranks(
 ) -> None:
     rank_groups: dict[tuple[Any, ...], list[Row]] = {}
     for row in rows:
-        if row.get("primary_metric_name") and row.get("primary_metric_mean") is not None:
+        if row.get("primary_metric_name") and _has_complete_primary_metric(row):
             key = tuple(row.get(field, "") for field in rank_group_by)
             rank_groups.setdefault(key, []).append(row)
 
     for group_rows in rank_groups.values():
-        metric_name = _consistent_non_empty_value(group_rows, "primary_metric_name")
-        if metric_name is None:
+        greater_is_better = _consistent_boolean_value(
+            group_rows,
+            "primary_metric_greater_is_better",
+        )
+        if greater_is_better is None:
             continue
-        reverse = not _lower_is_better(str(metric_name))
         ranked_rows = [
-            row for row in group_rows if _finite_number(row.get("primary_metric_mean")) is not None
+            row for row in group_rows if finite_number(row.get("primary_metric_mean")) is not None
         ]
         _assign_competition_ranks(
             ranked_rows,
             value_field="primary_metric_mean",
             rank_field="primary_metric_rank_by_dataset",
-            reverse=reverse,
+            reverse=greater_is_better,
         )
 
     overall_groups: dict[tuple[Any, ...], list[Row]] = {}
@@ -352,7 +356,7 @@ def _add_primary_metric_ranks(
         rank_by_method: dict[Any, list[float]] = {}
         for row in group_rows:
             method = row.get(method_field)
-            rank = _finite_number(row.get("primary_metric_rank_by_dataset"))
+            rank = finite_number(row.get("primary_metric_rank_by_dataset"))
             if method is not None and rank is not None:
                 rank_by_method.setdefault(method, []).append(rank)
 
@@ -361,7 +365,13 @@ def _add_primary_metric_ranks(
             mean_rank = sum(ranks) / len(ranks)
             for row in group_rows:
                 if row.get(method_field) == method:
-                    row["primary_metric_mean_rank"] = mean_rank
+                    row["primary_metric_rank_count"] = len(ranks)
+                    row["primary_metric_rank_coverage"] = len(ranks) / len(comparison_keys)
+                    if mean_rank is not None:
+                        row["primary_metric_mean_rank"] = mean_rank
+            if len(ranks) != len(comparison_keys):
+                continue
+            assert mean_rank is not None
             method_rows.append({method_field: method, "primary_metric_mean_rank": mean_rank})
 
         _assign_competition_ranks(
@@ -386,11 +396,11 @@ def _assign_competition_ranks(
     rank_field: str,
     reverse: bool,
 ) -> None:
-    rows.sort(key=lambda row: _finite_number(row.get(value_field)) or 0.0, reverse=reverse)
+    rows.sort(key=lambda row: finite_number(row.get(value_field)) or 0.0, reverse=reverse)
     previous_value: float | None = None
     previous_rank: int | None = None
     for index, row in enumerate(rows, start=1):
-        value = _finite_number(row.get(value_field))
+        value = finite_number(row.get(value_field))
         if value is None:
             continue
         rank = previous_rank if previous_value == value and previous_rank is not None else index
@@ -399,8 +409,22 @@ def _assign_competition_ranks(
         previous_rank = rank
 
 
-def _lower_is_better(metric_name: str) -> bool:
-    return metric_name in LOWER_IS_BETTER_METRICS
+def _has_complete_primary_metric(row: Row) -> bool:
+    n_runs = finite_number(row.get("n_runs"))
+    n_success = finite_number(row.get("n_success"))
+    n_failed = finite_number(row.get("n_failed"))
+    metric_count = finite_number(row.get("primary_metric_count"))
+    return (
+        n_runs is not None
+        and n_runs > 0
+        and n_success == n_runs
+        and n_failed == 0
+        and metric_count == n_success
+    )
+
+
+def _consistent_boolean_value(rows: list[Row], field: str) -> bool | None:
+    return boolean_value(_consistent_non_empty_value(rows, field))
 
 
 def _metadata_fields(rows: list[Row]) -> list[str]:
@@ -432,22 +456,10 @@ def _consistent_non_empty_value(rows: list[Row], field: str) -> Any | None:
 def _numeric_values(rows: list[Row], field: str) -> list[float]:
     values = []
     for row in rows:
-        numeric = _finite_number(row.get(field))
+        numeric = finite_number(row.get(field))
         if numeric is not None:
             values.append(numeric)
     return values
-
-
-def _finite_number(value: object) -> float | None:
-    if value is None or value == "":
-        return None
-    try:
-        numeric = float(value)
-    except (TypeError, ValueError):
-        return None
-    if math.isfinite(numeric):
-        return numeric
-    return None
 
 
 def _summary_stats(values: list[float]) -> dict[str, float | int | None]:

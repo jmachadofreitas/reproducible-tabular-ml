@@ -1,23 +1,25 @@
 from __future__ import annotations
 
+import warnings
 from collections.abc import Iterable, Mapping
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
-import warnings
 
 import numpy as np
 
-from rtml.core.metrics import MetricRequest, compute_metric
+from rtml.core.metrics import EvaluationMetrics
 from rtml.core.results import PredictionSet
+from rtml.core.tasks import MetricSpec
+from rtml.results._values import boolean_value, finite_number
 from rtml.results.artifacts import load_prediction_set
-from rtml.results.reports import LOWER_IS_BETTER_METRICS, Row, save_rows
+from rtml.results.reports import Row, save_rows
 
 
 def subgroup_metric_rows(
     rows: list[Row],
     *,
-    metrics_by_task: Mapping[str, Iterable[MetricRequest]],
+    metrics_by_task: Mapping[str, Iterable[MetricSpec]],
     min_count: int = 1,
 ) -> list[Row]:
     """Compute subgroup metric rows from saved prediction artifacts."""
@@ -50,7 +52,7 @@ def subgroup_metric_rows(
 def save_subgroup_summary(
     rows: list[Row],
     *,
-    metrics_by_task: Mapping[str, Iterable[MetricRequest]],
+    metrics_by_task: Mapping[str, Iterable[MetricSpec]],
     csv_path: str | Path | None = None,
     json_path: str | Path | None = None,
     markdown_path: str | Path | None = None,
@@ -70,13 +72,14 @@ def _subgroup_metric_rows(
     *,
     row: Row,
     predictions: PredictionSet,
-    metrics: list[MetricRequest],
+    metrics: list[MetricSpec],
     subgroup_column: str,
     values: np.ndarray,
     min_count: int,
 ) -> list[Row]:
     output_rows: list[Row] = []
-    overall_metrics = _compute_available_metrics(predictions, metrics)
+    evaluator = EvaluationMetrics(metrics)
+    overall_metrics = _evaluate_available_metrics(predictions, evaluator)
     for subgroup_value in _ordered_unique(values):
         mask = values == subgroup_value
         count = int(np.sum(mask))
@@ -93,7 +96,7 @@ def _subgroup_metric_rows(
         for metric in metrics:
             metric_name = metric.name
             try:
-                value = _compute_metric_quietly(metric, subgroup_predictions)
+                value = _compute_metric_quietly(evaluator, metric, subgroup_predictions)
             except Exception as exc:  # noqa: BLE001 - report per-subgroup metric failures.
                 output_row[f"metric.{metric_name}.error"] = str(exc) or type(exc).__name__
                 continue
@@ -126,6 +129,7 @@ def _base_subgroup_row(
         "resample_id": row.get("resample_id", ""),
         "seed": row.get("seed", ""),
         "primary_metric": row.get("primary_metric", ""),
+        "primary_metric_greater_is_better": row.get("primary_metric_greater_is_better"),
         "subgroup_column": subgroup_column,
         "subgroup_value": subgroup_value,
         "subgroup_count": count,
@@ -137,14 +141,14 @@ def _base_subgroup_row(
     return output_row
 
 
-def _compute_available_metrics(
+def _evaluate_available_metrics(
     predictions: PredictionSet,
-    metrics: list[MetricRequest],
+    evaluator: EvaluationMetrics,
 ) -> dict[str, float]:
     values: dict[str, float] = {}
-    for metric in metrics:
+    for metric in evaluator.metrics:
         try:
-            value = _compute_metric_quietly(metric, predictions)
+            value = _compute_metric_quietly(evaluator, metric, predictions)
         except Exception:  # noqa: BLE001 - invalid overall metric is reflected by missing deltas.
             continue
         if np.isfinite(value):
@@ -152,10 +156,14 @@ def _compute_available_metrics(
     return values
 
 
-def _compute_metric_quietly(metric: MetricRequest, predictions: PredictionSet) -> float:
+def _compute_metric_quietly(
+    evaluator: EvaluationMetrics,
+    metric: MetricSpec,
+    predictions: PredictionSet,
+) -> float:
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        return compute_metric(metric, predictions)
+        return evaluator.compute_metric(metric, predictions)
 
 
 def _subset_predictions(predictions: PredictionSet, mask: np.ndarray) -> PredictionSet:
@@ -187,29 +195,22 @@ def _mark_worst_primary_metric_subgroups(rows: list[Row]) -> None:
         metric_name = row.get("primary_metric")
         if not metric_name:
             continue
-        metric_value = _finite_number(row.get(f"metric.{metric_name}"))
+        metric_value = finite_number(row.get(f"metric.{metric_name}"))
         if metric_value is None:
             continue
         key = (row.get("run_id"), row.get("subgroup_column"), metric_name)
         groups.setdefault(key, []).append(row)
 
     for (_, _, metric_name), group_rows in groups.items():
-        reverse = metric_name in LOWER_IS_BETTER_METRICS
+        greater_is_better = boolean_value(
+            group_rows[0].get("primary_metric_greater_is_better")
+        )
+        if greater_is_better is None:
+            continue
         worst = sorted(
             group_rows,
-            key=lambda row: _finite_number(row.get(f"metric.{metric_name}")) or 0.0,
-            reverse=reverse,
+            key=lambda row: finite_number(row.get(f"metric.{metric_name}")) or 0.0,
+            reverse=not greater_is_better,
         )[0]
         worst["primary_metric_worst_subgroup"] = True
 
-
-def _finite_number(value: object) -> float | None:
-    if value is None or value == "":
-        return None
-    try:
-        number = float(value)
-    except (TypeError, ValueError):
-        return None
-    if np.isfinite(number):
-        return number
-    return None

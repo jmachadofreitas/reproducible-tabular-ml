@@ -24,6 +24,15 @@ OPENML_CC18_SUITE_ID = 99
 DEFAULT_OPENML_SPLIT = {"repeat": 0, "fold": 0, "sample": 0}
 DEFAULT_OPENML_DATA_DIR = Path("data/openml")
 
+OPENML_METRICS = {
+    "accuracy": ("accuracy", True),
+    "area_under_roc_curve": ("roc_auc", True),
+    "log_loss": ("log_loss", False),
+    "mean_absolute_error": ("mae", False),
+    "mean_squared_error": ("mse", False),
+    "predictive_accuracy": ("accuracy", True),
+    "root_mean_squared_error": ("rmse", False),
+}
 
 def configure_openml_storage(
     root_cache_directory: str | Path = DEFAULT_OPENML_DATA_DIR,
@@ -110,11 +119,14 @@ def _build_metric_specs(
 
     if measure is None:
         return [], None
-
-    # Define others?
-    # ...
-
-    return [MetricSpec(name=measure)], measure
+    try:
+        metric_name, greater_is_better = OPENML_METRICS[measure]
+    except KeyError as exc:
+        supported = ", ".join(sorted(OPENML_METRICS))
+        raise ValueError(
+            f"unsupported OpenML evaluation measure {measure!r}; supported measures: {supported}"
+        ) from exc
+    return [MetricSpec(name=metric_name, greater_is_better=greater_is_better)], metric_name
 
 
 def _build_task_spec(
