@@ -1,6 +1,11 @@
 import pytest
 
-from rtml.core.resampling import Resample, ResamplingSpec, ResamplingStrategy
+from rtml.core.resampling import (
+    Resample,
+    ResamplingPlan,
+    ResamplingSpec,
+    ResamplingStrategy,
+)
 
 
 def test_resample_normalizes_indices_and_metadata() -> None:
@@ -14,6 +19,58 @@ def test_resample_normalizes_indices_and_metadata() -> None:
     assert resample.train_idx.tolist() == [0, 2, 4]
     assert resample.test_idx.tolist() == [1, 3]
     assert resample.metadata == {"fold": 0}
+
+
+def test_resampling_fingerprint_ignores_unused_spec_fields() -> None:
+    resample = Resample(id="split_00", train_idx=[0, 2], test_idx=[1, 3])
+    first = ResamplingPlan(
+        dataset_name="dataset",
+        task_name="task",
+        spec=ResamplingSpec(
+            name="first",
+            strategy=ResamplingStrategy.HOLDOUT,
+            test_size=0.5,
+            n_folds=2,
+            n_samples=3,
+        ),
+        resamples=[resample],
+    )
+    second = ResamplingPlan(
+        dataset_name="dataset",
+        task_name="task",
+        spec=ResamplingSpec(
+            name="second",
+            strategy=ResamplingStrategy.HOLDOUT,
+            test_size=0.5,
+            n_folds=9,
+            n_samples=7,
+        ),
+        resamples=[resample],
+    )
+
+    assert first.fingerprint == second.fingerprint
+
+
+def test_resampling_fingerprint_changes_with_materialized_indices() -> None:
+    spec = ResamplingSpec(
+        name="holdout",
+        strategy=ResamplingStrategy.HOLDOUT,
+        test_size=0.5,
+    )
+    first = ResamplingPlan(
+        dataset_name="dataset",
+        task_name="task",
+        spec=spec,
+        resamples=[Resample(id="split_00", train_idx=[0, 2], test_idx=[1, 3])],
+    )
+    second = ResamplingPlan(
+        dataset_name="dataset",
+        task_name="task",
+        spec=spec,
+        resamples=[Resample(id="split_00", train_idx=[0, 3], test_idx=[1, 2])],
+    )
+
+    assert first.fingerprint != second.fingerprint
 
 
 def test_kfold_resampling_spec_requires_multiple_folds() -> None:
@@ -36,6 +93,26 @@ def test_stratified_holdout_requires_test_size_and_stratify() -> None:
 def test_group_kfold_requires_group_columns() -> None:
     with pytest.raises(ValueError, match="requires groups"):
         ResamplingSpec(name="bad_group_kfold", strategy=ResamplingStrategy.GROUP_KFOLD, n_folds=5)
+
+
+def test_bootstrap_requires_replacement() -> None:
+    with pytest.raises(ValueError, match="sampling with replacement"):
+        ResamplingSpec(
+            name="bad_bootstrap",
+            strategy=ResamplingStrategy.BOOTSTRAP,
+            n_samples=10,
+            replacement=False,
+        )
+
+
+def test_bootstrap_rejects_validation_split() -> None:
+    with pytest.raises(ValueError, match="does not support a validation split"):
+        ResamplingSpec(
+            name="bad_bootstrap",
+            strategy=ResamplingStrategy.BOOTSTRAP,
+            n_samples=10,
+            valid_size=0.2,
+        )
 
 
 def test_openml_task_resampling_spec_stays_valid() -> None:

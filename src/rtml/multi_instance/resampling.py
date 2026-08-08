@@ -92,6 +92,30 @@ def build_multi_instance_resampling_plan(
                     fold=fold,
                 )
             )
+    elif spec.strategy == ResamplingStrategy.BOOTSTRAP:
+        if dataset.n_bags < 2:
+            raise ValueError("bootstrap requires at least two bags")
+        rng = np.random.default_rng(spec.seed)
+        for sample in range(spec.n_samples):
+            for _ in range(100):
+                train_idx = rng.choice(
+                    bag_indices,
+                    size=dataset.n_bags,
+                    replace=True,
+                )
+                test_idx = np.setdiff1d(bag_indices, np.unique(train_idx))
+                if len(test_idx) > 0:
+                    break
+            else:
+                raise RuntimeError("could not draw a bootstrap sample with out-of-bag bags")
+            resamples.append(
+                _resample(
+                    f"sample_{sample:02d}",
+                    train_idx,
+                    test_idx,
+                    sample=sample,
+                )
+            )
     else:
         raise NotImplementedError(
             f"multi-instance resampling does not support {spec.strategy.value}"
@@ -183,8 +207,17 @@ def _with_validation_split(
     )
 
 
-def _resample(id: str, train_idx, test_idx, *, fold: int | None = None) -> Resample:
+def _resample(
+    id: str,
+    train_idx,
+    test_idx,
+    *,
+    fold: int | None = None,
+    sample: int | None = None,
+) -> Resample:
     metadata: dict[str, Any] = {"paradigm": "multi_instance", "unit": "bag"}
     if fold is not None:
         metadata["fold"] = fold
+    if sample is not None:
+        metadata["sample"] = sample
     return Resample(id=id, train_idx=train_idx, test_idx=test_idx, metadata=metadata)

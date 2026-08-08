@@ -97,8 +97,10 @@ class ResamplingSpec:
         ):
             raise ValueError(f"{self.strategy.value} requires n_folds >= 2")
 
-        if self.strategy == ResamplingStrategy.BOOTSTRAP and self.n_samples < 2:
-            raise ValueError("bootstrap requires n_samples >= 2")
+        if self.strategy == ResamplingStrategy.BOOTSTRAP and not self.replacement:
+            raise ValueError("bootstrap requires sampling with replacement")
+        if self.strategy == ResamplingStrategy.BOOTSTRAP and self.valid_size is not None:
+            raise ValueError("bootstrap does not support a validation split")
 
         if (
             self.strategy
@@ -170,7 +172,3 @@ class ResamplingPlan:
             if resample.id == resample_id:
                 return resample
         raise ValueError(f"unknown resample id {resample_id!r}")
-
-
-def create_openml_resample_id(*, repeat: int, fold: int, sample: int) -> str:
-    return f"repeat_{repeat:02d}_fold_{fold:02d}_sample_{sample:02d}"
