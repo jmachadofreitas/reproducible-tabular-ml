@@ -217,3 +217,64 @@ class SklearnBackend(MethodBackend):
             predict_time=predict_time,
             metadata={"preprocessing_policy": policy},
         )
+
+    def refit(
+        self,
+        *,
+        dataset: Any,
+        task: Any,
+        method: MethodSpec,
+        artifact_dir: Path,
+        seed: int = 0,
+        runtime: RuntimeSpec | None = None,
+        logger: Any | None = None,
+    ) -> BackendRefitResult:
+        """Fit and save a complete sklearn pipeline on all labeled rows."""
+        if not isinstance(dataset, Dataset) or not isinstance(task, TaskSpec):
+            raise TypeError("sklearn refit requires a single-instance Dataset and TaskSpec")
+        self.validate_method(method)
+        task.validate_columns(dataset)
+        if task.sample_weight is not None:
+            raise ValueError("sklearn refit does not support sample-weighted tasks")
+        x = task.source_frame(dataset)
+        y = task.target_series(dataset)
+        if y is None:
+            raise ValueError("sklearn refit requires a supervised task target")
+        if y.isna().any():
+            raise ValueError("sklearn refit requires a target value for every training row")
+
+        pipeline = build_sklearn_pipeline(
+            dataset=dataset,
+            task=task,
+            method=method,
+            seed=seed,
+            runtime=runtime,
+        )
+        fit_start = perf_counter()
+        pipeline.fit(x, y)
+        fit_time = perf_counter() - fit_start
+
+        artifact_path = artifact_dir / "method.joblib"
+        joblib.dump(pipeline, artifact_path)
+        return BackendRefitResult(
+            fitted_method=pipeline,
+            artifact_paths={"method": artifact_path},
+            artifact_formats={"method": "joblib"},
+            training_size=len(x),
+            input_schema={name: dataset.schema.get(name) for name in task.source},
+            fit_time=fit_time,
+            metadata={"preprocessing_policy": method.transform.get("policy", "linear_default")},
+        )
+
+    def load_refit(
+        self,
+        *,
+        artifact_dir: Path,
+        manifest: Mapping[str, Any],
+        runtime: RuntimeSpec | None = None,
+    ) -> Pipeline:
+        """Load a trusted fitted sklearn pipeline."""
+        artifact = manifest["artifacts"]["method"]
+        if artifact["format"] != "joblib":
+            raise ValueError(f"unsupported sklearn refit format {artifact['format']!r}")
+        return joblib.load(artifact_dir / artifact["path"])

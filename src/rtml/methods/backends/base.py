@@ -22,6 +22,19 @@ class BackendResult:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass
+class BackendRefitResult:
+    """Fitted method and native files produced by one backend refit."""
+
+    fitted_method: Any
+    artifact_paths: dict[str, Path]
+    artifact_formats: dict[str, str]
+    training_size: int
+    input_schema: dict[str, Any]
+    fit_time: float
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
 class MethodBackend(Protocol):
     name: str
 
@@ -41,3 +54,29 @@ class MethodBackend(Protocol):
     ) -> BackendResult:
         """Execute one method on one benchmark case/resample."""
         ...
+
+
+class RefitBackend(Protocol):
+    """Backend capability required by final method refitting."""
+
+    name: str
+
+    def refit(
+        self,
+        *,
+        dataset: Any,
+        task: Any,
+        method: MethodSpec,
+        artifact_dir: Path,
+        seed: int = 0,
+        runtime: RuntimeSpec | None = None,
+        logger: Any | None = None,
+    ) -> BackendRefitResult: ...
+
+    def load_refit(
+        self,
+        *,
+        artifact_dir: Path,
+        manifest: Mapping[str, Any],
+        runtime: RuntimeSpec | None = None,
+    ) -> Any: ...

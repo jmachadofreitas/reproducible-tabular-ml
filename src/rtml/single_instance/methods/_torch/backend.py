@@ -102,6 +102,8 @@ class TorchBackend(MethodBackend):
         case.task.validate_columns(case.dataset)
         if case.task.task_type == TaskType.UNSUPERVISED:
             raise ValueError("torch backend currently supports supervised tasks only")
+        if case.task.sample_weight is not None:
+            raise ValueError("torch backend does not support sample-weighted tasks")
         resample = case.resampling.get_resample(resample_id)
         fit_config = TorchFitConfig.from_mapping(method.fit)
         resample = self._with_validation_split(
@@ -182,9 +184,197 @@ class TorchBackend(MethodBackend):
             metadata=self._metadata(bundle=bundle, policy=policy, device=device, trainer=trainer),
         )
 
+    def refit(
+        self,
+        *,
+        dataset: Any,
+        task: Any,
+        method: MethodSpec,
+        artifact_dir: Path,
+        seed: int = 0,
+        runtime: RuntimeSpec | None = None,
+        logger: Logger | None = None,
+    ) -> BackendRefitResult:
+        """Fit and save a complete single-instance Torch method on all labeled rows."""
+        if not isinstance(dataset, Dataset) or not isinstance(task, TaskSpec):
+            raise TypeError("torch refit requires a single-instance Dataset and TaskSpec")
+        model_builder = self._model_builder_for(method)
+        task.validate_columns(dataset)
+        if task.task_type == TaskType.UNSUPERVISED:
+            raise ValueError("torch refit currently supports supervised tasks only")
+        if task.sample_weight is not None:
+            raise ValueError("torch refit does not support sample-weighted tasks")
+        target = task.target_series(dataset)
+        if target is None:
+            raise ValueError("torch refit requires a supervised task target")
+        if target.isna().any():
+            raise ValueError("torch refit requires a target value for every training row")
+
+        fit_config = TorchFitConfig.from_mapping(method.fit)
+        self._validate_refit_config(fit_config)
+        device = resolve_device(runtime)
+        generator = seed_torch(
+            seed,
+            deterministic=None if runtime is None else runtime.deterministic,
+        )
+        transform_config = dict(method.transform)
+        policy = transform_config.pop("policy", "neural_default")
+
+        fit_start = perf_counter()
+        preprocessor = build_preprocessor(
+            dataset=dataset,
+            task=task,
+            policy=policy,
+            options=transform_config,
+        )
+        inputs = as_float32_array(preprocessor.fit_transform(task.source_frame(dataset), target))
+        targets, _, classes = target_tensors(
+            task_type=task.task_type,
+            y_train=target,
+            y_eval=target,
+        )
+        bundle = model_builder(
+            task=task,
+            input_dim=inputs.shape[1],
+            n_classes=None if classes is None else len(classes),
+            params=method.model.params,
+            fit_config=fit_config,
+            device=device,
+        )
+        train_loader = DataLoader(
+            TensorDataset(torch.as_tensor(inputs), targets),
+            batch_size=fit_config.batch_size,
+            shuffle=True,
+            generator=generator,
+        )
+        score_metric: MetricSpec = resolve_score_metric(task.primary_metric, task.metrics)
+        fit_model_bundle(
+            bundle,
+            train_loader,
+            score_name=score_metric.name,
+            score_mode=infer_score_mode(score_metric),
+            device=device,
+            logger=logger,
+        )
+        fit_time = perf_counter() - fit_start
+
+        preprocessor_path = artifact_dir / "preprocessor.joblib"
+        model_path = artifact_dir / "model.pt"
+        joblib.dump(preprocessor, preprocessor_path)
+        torch.save(bundle.model.state_dict(), model_path)
+        fitted_method = TorchFittedMethod(
+            preprocessor=preprocessor,
+            model_bundle=bundle,
+            source_columns=task.source,
+            classes=classes,
+            device=device,
+        )
+        return BackendRefitResult(
+            fitted_method=fitted_method,
+            artifact_paths={
+                "preprocessor": preprocessor_path,
+                "model": model_path,
+            },
+            artifact_formats={
+                "preprocessor": "joblib",
+                "model": "torch_state_dict",
+            },
+            training_size=len(dataset),
+            input_schema={name: dataset.schema.get(name) for name in task.source},
+            fit_time=fit_time,
+            metadata={
+                "preprocessing_policy": policy,
+                "input_dim": inputs.shape[1],
+                "classes": None if classes is None else classes.tolist(),
+                **dict(bundle.metadata),
+            },
+        )
+
+    def load_refit(
+        self,
+        *,
+        artifact_dir: Path,
+        manifest: Mapping[str, Any],
+        runtime: RuntimeSpec | None = None,
+    ) -> TorchFittedMethod:
+        """Reconstruct a trusted fitted Torch method from native artifacts."""
+        method_data = manifest["method"]
+        model_data = method_data["model"]
+        method = MethodSpec(
+            name=method_data["name"],
+            transform=method_data["transform"],
+            model=ModelSpec(
+                kind=model_data["kind"],
+                backend=model_data["backend"],
+                params=model_data["params"],
+            ),
+            fit=method_data["fit"],
+            metadata=method_data.get("metadata", {}),
+        )
+        task_data = manifest["task"]
+        task = TaskSpec(
+            name=task_data["name"],
+            task_type=TaskType(task_data["task_type"]),
+            source=task_data["source"],
+            target=task_data["target"],
+            sample_weight=task_data.get("sample_weight"),
+            groups=task_data.get("groups", []),
+            timestamp=task_data.get("timestamp"),
+            sensitive_attributes=task_data.get("sensitive_attributes", []),
+            context=task_data.get("context", []),
+            metrics=[MetricSpec(**metric) for metric in task_data.get("metrics", [])],
+            primary_metric=task_data.get("primary_metric"),
+            metadata=task_data.get("metadata", {}),
+        )
+        device = resolve_device(runtime)
+        fit_config = TorchFitConfig.from_mapping(method.fit)
+        classes_value = manifest["metadata"].get("classes")
+        classes = None if classes_value is None else np.asarray(classes_value)
+        bundle = self._model_builder_for(method)(
+            task=task,
+            input_dim=int(manifest["metadata"]["input_dim"]),
+            n_classes=None if classes is None else len(classes),
+            params=method.model.params,
+            fit_config=fit_config,
+            device=device,
+        )
+        model_artifact = manifest["artifacts"]["model"]
+        if model_artifact["format"] != "torch_state_dict":
+            raise ValueError(f"unsupported torch model format {model_artifact['format']!r}")
+        state = torch.load(
+            artifact_dir / model_artifact["path"],
+            map_location=device,
+            weights_only=True,
+        )
+        bundle.model.load_state_dict(state)
+        preprocessor_artifact = manifest["artifacts"]["preprocessor"]
+        if preprocessor_artifact["format"] != "joblib":
+            raise ValueError(
+                f"unsupported torch preprocessor format {preprocessor_artifact['format']!r}"
+            )
+        preprocessor = joblib.load(artifact_dir / preprocessor_artifact["path"])
+        return TorchFittedMethod(
+            preprocessor=preprocessor,
+            model_bundle=bundle,
+            source_columns=task.source,
+            classes=classes,
+            device=device,
+        )
+
     def _model_builder_for(self, method: MethodSpec) -> TorchModelBuilder:
         self.validate_method(method)
         return self._model_builders[method.model.kind]
+
+    @staticmethod
+    def _validate_refit_config(fit_config: TorchFitConfig) -> None:
+        if fit_config.validation_fraction:
+            raise ValueError("torch refit uses all rows and cannot create a validation split")
+        if fit_config.early_stopping_patience is not None:
+            raise ValueError("torch refit cannot use early stopping without validation data")
+        checkpoint = fit_config.checkpoint
+        checkpoint_enabled = bool(checkpoint.get("enabled", bool(checkpoint.get("resume_from"))))
+        if checkpoint_enabled:
+            raise ValueError("torch refit artifacts are separate from resumable checkpoints")
 
     @staticmethod
     def _with_validation_split(
