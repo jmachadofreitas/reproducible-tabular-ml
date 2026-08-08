@@ -5,6 +5,7 @@ on instances from training bags, bag-level features, or derived bag summaries,
 but never on instances from held-out bags.
 """
 
+from rtml.multi_instance.preprocessing.aggregation import build_bag_feature_dataset
 from rtml.multi_instance.preprocessing.policies import build_preprocessor
 
-__all__ = ["build_preprocessor"]
+__all__ = ["build_bag_feature_dataset", "build_preprocessor"]
