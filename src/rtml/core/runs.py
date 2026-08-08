@@ -1,7 +1,5 @@
 """Run planning and records used for reproducible execution."""
 
-from __future__ import annotations
-
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal

@@ -2,7 +2,7 @@
 name = "rtml"
 version = "0.1.0"
 description = "Reproducible benchmarking for tabular ML methods"
-requires-python = ">=3.11"
+requires-python = ">=3.14"
 license = { file = "LICENSE" }
 dependencies = [
     "torch",
@@ -38,7 +38,7 @@ explicit = true
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py314"
 
 [tool.ruff.lint]
 extend-select = ["I"]

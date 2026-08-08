@@ -1,14 +1,13 @@
 """Stable fingerprints for RTML experiment evidence."""
 
-from __future__ import annotations
-
-from dataclasses import asdict, is_dataclass
-from enum import Enum
 import hashlib
 import json
+from dataclasses import asdict, is_dataclass
+from enum import Enum
 from typing import Any
 
 import numpy as np
+import pandas as pd
 
 
 def stable_jsonable(value: Any) -> Any:

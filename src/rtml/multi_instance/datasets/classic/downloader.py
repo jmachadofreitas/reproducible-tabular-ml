@@ -1,13 +1,11 @@
 """Download and cache helpers for the classic WEKA MIL archive."""
 
-from __future__ import annotations
-
-from collections.abc import Sequence
-from pathlib import Path
-from urllib.request import Request, urlopen
 import hashlib
 import shutil
 import zipfile
+from collections.abc import Sequence
+from pathlib import Path
+from urllib.request import Request, urlopen
 
 from rtml.multi_instance.datasets.classic.constants import (
     CLASSIC_MIL_ARCHIVE_NAME,

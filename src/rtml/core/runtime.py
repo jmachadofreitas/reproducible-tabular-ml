@@ -1,10 +1,7 @@
-from __future__ import annotations
-
-from dataclasses import dataclass, field
-from importlib.metadata import PackageNotFoundError, version
 import platform as platform_module
 import sys
-
+from dataclasses import dataclass, field
+from importlib.metadata import PackageNotFoundError, version
 
 DEFAULT_RUNTIME_PACKAGES = (
     "numpy",

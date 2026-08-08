@@ -1,10 +1,10 @@
-from __future__ import annotations
-
+from collections.abc import Mapping
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
-from rtml.core.results import PredictionSet
 from rtml.core.methods import MethodSpec
+from rtml.core.results import PredictionSet
 from rtml.core.runtime import RuntimeSpec
 
 if TYPE_CHECKING:

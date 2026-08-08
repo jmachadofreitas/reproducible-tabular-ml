@@ -1,12 +1,10 @@
-from __future__ import annotations
-
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Literal, overload
 
-import pandas as pd
 import numpy as np
+import pandas as pd
 
 
 class FeatureKind(str, Enum):

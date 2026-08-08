@@ -1,7 +1,5 @@
 """Small builders for constructing RTML specs from plain Python mappings."""
 
-from __future__ import annotations
-
 from collections.abc import Mapping, Sequence
 from typing import Any
 

@@ -1,7 +1,5 @@
 """Constants for the classic WEKA multiple-instance datasets."""
 
-from __future__ import annotations
-
 from pathlib import Path
 
 DEFAULT_CLASSIC_MIL_DATA_DIR = Path("data/multi_instance/classic_mil")

@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from collections.abc import Mapping, Sequence
 from contextlib import ExitStack, contextmanager
 from pathlib import Path

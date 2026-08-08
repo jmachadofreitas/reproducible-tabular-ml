@@ -1,10 +1,10 @@
 """Parser for WEKA relational ARFF multiple-instance datasets."""
 
+import csv
+import sys
 from io import StringIO
 from pathlib import Path
 from typing import NamedTuple
-import csv
-import sys
 
 import numpy as np
 import pandas as pd

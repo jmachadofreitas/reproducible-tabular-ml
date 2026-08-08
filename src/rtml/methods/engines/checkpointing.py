@@ -1,7 +1,5 @@
 """Checkpoint helpers for the Torch/Ignite engine."""
 
-from __future__ import annotations
-
 import re
 from collections.abc import Mapping
 from pathlib import Path

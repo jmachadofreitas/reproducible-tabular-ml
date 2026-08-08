@@ -4,8 +4,6 @@ Reference:
     https://github.com/manzilzaheer/DeepSets/tree/master/PopStats/generator
 """
 
-from __future__ import annotations
-
 from collections.abc import Callable
 from typing import Literal
 
