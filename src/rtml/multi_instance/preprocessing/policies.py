@@ -17,12 +17,12 @@ def build_preprocessor(
     policy: str = "neural_default",
     options: Mapping[str, Any] | None = None,
 ) -> Pipeline:
-    """Build the numeric instance transform used by current neural MIL methods."""
-    if policy != "neural_default":
+    """Build a numeric instance transform for a multi-instance method."""
+    if policy not in {"linear_default", "neural_default"}:
         raise ValueError(f"unsupported multi-instance preprocessing policy {policy!r}")
     if options:
         unknown = ", ".join(sorted(options))
-        raise ValueError(f"unknown neural_default preprocessing options: {unknown}")
+        raise ValueError(f"unknown {policy} preprocessing options: {unknown}")
 
     task.validate_columns(dataset)
     unsupported = [
@@ -32,7 +32,7 @@ def build_preprocessor(
     ]
     if unsupported:
         raise ValueError(
-            f"neural_default currently supports numeric MIL instance features only: {unsupported}"
+            f"{policy} currently supports numeric MIL instance features only: {unsupported}"
         )
 
     missing_columns = [
