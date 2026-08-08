@@ -7,7 +7,6 @@ import numpy.typing as npt
 import pandas as pd
 
 from rtml.core.datasets import FeatureInfo, FeatureKind, FeatureSchema, FeatureTagLike
-
 from rtml.core.fingerprints import fingerprint_frame
 
 IndexArray: TypeAlias = npt.NDArray[np.integer[Any]]
@@ -73,6 +72,13 @@ class MultiInstanceDataset:
 
     def __len__(self) -> int:
         return len(self.bag_table)
+
+    def __getitem__(
+        self,
+        bag_positions: int | np.integer[Any] | Sequence[int] | slice | IndexArray,
+    ) -> tuple[pd.DataFrame, np.ndarray]:
+        """Select one or more bags by position."""
+        return self.select_bags(bag_positions)
 
     @property
     def n_bags(self) -> int:
@@ -161,35 +167,30 @@ class MultiInstanceDataset:
             raise ValueError(f"instance columns not present in dataset {self.name!r}: {missing}")
 
     def select_bags(
-        self, bag_positions: Sequence[int] | slice | IndexArray
-    ) -> MultiInstanceDataset:
-        if isinstance(bag_positions, slice):
+        self,
+        bag_positions: int | np.integer[Any] | Sequence[int] | slice | IndexArray,
+    ) -> tuple[pd.DataFrame, np.ndarray]:
+        """Select ordered bag instances and return their relative offsets."""
+        if isinstance(bag_positions, int | np.integer):
+            positions = [int(bag_positions)]
+        elif isinstance(bag_positions, slice):
             positions = list(range(self.n_bags))[bag_positions]
         else:
             positions = [int(position) for position in bag_positions]
+        positions_array = np.asarray(positions, dtype=int)
+        if np.any(positions_array < 0) or np.any(positions_array >= self.n_bags):
+            raise IndexError("bag position out of range")
 
-        instance_chunks = [self.bag_instances(position) for position in positions]
-        selected_instances = (
-            pd.concat(instance_chunks, axis=0, ignore_index=True)
-            if instance_chunks
-            else self.instance_table.iloc[0:0].copy()
+        starts = self.bag_offsets[positions_array]
+        stops = self.bag_offsets[positions_array + 1]
+        offsets = np.concatenate(([0], np.cumsum(stops - starts))).astype(int)
+        instance_positions = (
+            np.concatenate([np.arange(start, stop) for start, stop in zip(starts, stops)])
+            if len(starts)
+            else np.asarray([], dtype=int)
         )
-        selected_bags = self.bag_table.iloc[positions].reset_index(drop=True)
-        bag_offsets = np.zeros(len(positions) + 1, dtype=int)
-        if positions:
-            bag_offsets[1:] = np.cumsum([len(chunk) for chunk in instance_chunks])
-
-        return MultiInstanceDataset(
-            name=self.name,
-            bag_table=selected_bags,
-            instance_table=selected_instances,
-            bag_schema=self.bag_schema,
-            instance_schema=self.instance_schema,
-            bag_offsets=bag_offsets,
-            bag_id_column=self.bag_id_column,
-            instance_id_column=self.instance_id_column,
-            metadata=self.metadata,
-        )
+        instances = self.instance_table.iloc[instance_positions].reset_index(drop=True)
+        return instances, offsets
 
     @overload
     def select_instance_features(
@@ -245,12 +246,8 @@ class MultiInstanceDataset:
 
         frame_columns = [str(column) for column in frame.columns]
         schema_columns = schema.names
-        missing_from_schema = [
-            column for column in frame_columns if column not in schema
-        ]
-        extra_in_schema = [
-            column for column in schema_columns if column not in frame_columns
-        ]
+        missing_from_schema = [column for column in frame_columns if column not in schema]
+        extra_in_schema = [column for column in schema_columns if column not in frame_columns]
         if missing_from_schema or extra_in_schema:
             raise ValueError(
                 f"{frame_name} columns and schema features must match "
@@ -273,13 +270,9 @@ class MultiInstanceDataset:
         if self.bag_id_column is not None:
             self.require_bag_columns([self.bag_id_column])
             if self.bag_schema.get(self.bag_id_column).kind != FeatureKind.ID:
-                raise ValueError(
-                    f"bag_id_column {self.bag_id_column!r} must have FeatureKind.ID"
-                )
+                raise ValueError(f"bag_id_column {self.bag_id_column!r} must have FeatureKind.ID")
             if self.bag_table[self.bag_id_column].duplicated().any():
-                raise ValueError(
-                    f"bag_id_column {self.bag_id_column!r} contains duplicate values"
-                )
+                raise ValueError(f"bag_id_column {self.bag_id_column!r} contains duplicate values")
 
         if self.instance_id_column is not None:
             self.require_instance_columns([self.instance_id_column])

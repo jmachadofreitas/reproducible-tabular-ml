@@ -237,6 +237,22 @@ class Dataset:
     def __len__(self) -> int:
         return len(self.data)
 
+    @overload
+    def __getitem__(self, rows: int | np.integer[Any]) -> pd.Series: ...
+
+    @overload
+    def __getitem__(
+        self,
+        rows: Sequence[int] | np.ndarray | slice,
+    ) -> pd.DataFrame: ...
+
+    def __getitem__(
+        self,
+        rows: int | np.integer[Any] | Sequence[int] | np.ndarray | slice,
+    ) -> pd.Series | pd.DataFrame:
+        """Select one or more rows by position."""
+        return self.data.iloc[rows]  # FIX
+
     @property
     def columns(self) -> set[str]:
         return self._column_set
@@ -288,9 +304,10 @@ class Dataset:
 
     def select_rows(self, rows: Sequence[int] | np.ndarray | slice) -> Dataset:
         if isinstance(rows, slice):
-            selected = self.data.iloc[rows]
+            positions = list(range(len(self)))[rows]
         else:
-            selected = self.data.iloc[list(rows)]
+            positions = [int(position) for position in rows]
+        selected = self.data.iloc[positions]
         metadata = dict(self.metadata)
         if "source_identity" in metadata:
             metadata["source_identity"] = {

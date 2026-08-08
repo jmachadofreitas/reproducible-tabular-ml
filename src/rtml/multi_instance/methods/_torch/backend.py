@@ -31,6 +31,9 @@ from rtml.methods.engines.task_adapters import (
     target_tensors,
 )
 from rtml.multi_instance.datasets.base import MultiInstanceDataset
+from rtml.multi_instance.methods._torch.attention_deep_mil.factory import (
+    build_attention_deep_mil_bundle,
+)
 from rtml.multi_instance.methods._torch.data import (
     BagDatasetBundle,
     BagLoaderBundle,
@@ -38,18 +41,10 @@ from rtml.multi_instance.methods._torch.data import (
     as_float32_array,
     collate_bags,
 )
-from rtml.multi_instance.methods._torch.attention_deep_mil.factory import (
-    build_attention_deep_mil_bundle,
-)
 from rtml.multi_instance.methods._torch.deep_sets.factory import build_deep_sets_bundle
 from rtml.multi_instance.methods._torch.outputs import build_prediction_set
 from rtml.multi_instance.preprocessing import build_preprocessor
 from rtml.multi_instance.tasks import MultiInstanceTask
-
-
-def default_multi_instance_backends() -> tuple[MethodBackend, ...]:
-    """Return built-in multi-instance method backends."""
-    return (MultiInstanceTorchBackend(),)
 
 
 class MultiInstanceTorchModelBuilder(Protocol):
@@ -226,9 +221,8 @@ class MultiInstanceTorchBackend(MethodBackend):
         policy: str,
         transform_options: Mapping[str, Any],
     ) -> BagDatasetBundle:
-        train = dataset.select_bags(resample.train_idx)
-        test = dataset.select_bags(resample.test_idx)
-        validation = None if resample.valid_idx is None else dataset.select_bags(resample.valid_idx)
+        train_frame, train_offsets = dataset[resample.train_idx]
+        test_frame, test_offsets = dataset[resample.test_idx]
         preprocessor = build_preprocessor(
             dataset,
             task,
@@ -236,12 +230,8 @@ class MultiInstanceTorchBackend(MethodBackend):
             options=transform_options,
         )
         columns = task.instance_source
-        train_instances = as_float32_array(
-            preprocessor.fit_transform(train.instance_table.loc[:, columns])
-        )
-        test_instances = as_float32_array(
-            preprocessor.transform(test.instance_table.loc[:, columns])
-        )
+        train_instances = as_float32_array(preprocessor.fit_transform(train_frame.loc[:, columns]))
+        test_instances = as_float32_array(preprocessor.transform(test_frame.loc[:, columns]))
 
         target = task.target_series(dataset)
         if target is None:
@@ -254,9 +244,10 @@ class MultiInstanceTorchBackend(MethodBackend):
             y_eval=y_test,
         )
         validation_dataset = None
-        if validation is not None and resample.valid_idx is not None:
+        if resample.valid_idx is not None:
+            validation_frame, validation_offsets = dataset[resample.valid_idx]
             validation_instances = as_float32_array(
-                preprocessor.transform(validation.instance_table.loc[:, columns])
+                preprocessor.transform(validation_frame.loc[:, columns])
             )
             _, validation_targets, _ = target_tensors(
                 task_type=task.task_type,
@@ -265,14 +256,14 @@ class MultiInstanceTorchBackend(MethodBackend):
             )
             validation_dataset = BagTensorDataset(
                 validation_instances,
-                validation.bag_offsets,
+                validation_offsets,
                 validation_targets,
             )
 
         return BagDatasetBundle(
-            train=BagTensorDataset(train_instances, train.bag_offsets, train_targets),
+            train=BagTensorDataset(train_instances, train_offsets, train_targets),
             validation=validation_dataset,
-            test=BagTensorDataset(test_instances, test.bag_offsets, test_targets),
+            test=BagTensorDataset(test_instances, test_offsets, test_targets),
             classes=classes,
             input_dim=train_instances.shape[1],
         )

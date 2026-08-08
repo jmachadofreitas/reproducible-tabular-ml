@@ -3,6 +3,7 @@ from pathlib import Path
 from time import perf_counter
 from typing import Any, Protocol
 
+import joblib
 import numpy as np
 import torch
 from sklearn.model_selection import train_test_split
@@ -17,7 +18,7 @@ from rtml.core.results import PredictionSet
 from rtml.core.runtime import RuntimeSpec
 from rtml.core.tasks import MetricSpec, TaskSpec, TaskType
 from rtml.loggers import Logger
-from rtml.methods.backends.base import BackendResult, MethodBackend
+from rtml.methods.backends.base import BackendRefitResult, BackendResult, MethodBackend
 from rtml.methods.engines.bundles import TorchModelBundle
 from rtml.methods.engines.checkpointing import (
     CheckpointManager,
@@ -233,14 +234,18 @@ class TorchBackend(MethodBackend):
         policy: str,
         transform_config: dict[str, Any],
     ) -> TensorDatasetBundle:
-        x = case.task.source_frame(case.dataset)
-        y = require_supervised_target(case)
-        x_train = x.iloc[resample.train_idx]
-        y_train = y.iloc[resample.train_idx]
-        x_validation = None if resample.valid_idx is None else x.iloc[resample.valid_idx]
-        y_validation = None if resample.valid_idx is None else y.iloc[resample.valid_idx]
-        x_test = x.iloc[resample.test_idx]
-        y_test = y.iloc[resample.test_idx]
+        target_column = case.task.target
+        if target_column is None:
+            raise ValueError("torch methods require a supervised task target")
+        train_data = case.dataset[resample.train_idx]
+        test_data = case.dataset[resample.test_idx]
+        validation_data = None if resample.valid_idx is None else case.dataset[resample.valid_idx]
+        x_train = train_data.loc[:, case.task.source]
+        y_train = train_data.loc[:, target_column]
+        x_validation = None if validation_data is None else validation_data.loc[:, case.task.source]
+        y_validation = None if validation_data is None else validation_data.loc[:, target_column]
+        x_test = test_data.loc[:, case.task.source]
+        y_test = test_data.loc[:, target_column]
 
         preprocessor = build_preprocessor(
             dataset=case.dataset,

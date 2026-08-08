@@ -3,7 +3,9 @@ from pathlib import Path
 from time import perf_counter
 from typing import Any
 
+import joblib
 import numpy as np
+from sklearn.dummy import DummyClassifier, DummyRegressor
 from sklearn.ensemble import (
     GradientBoostingClassifier,
     GradientBoostingRegressor,
@@ -12,18 +14,18 @@ from sklearn.ensemble import (
     RandomForestClassifier,
     RandomForestRegressor,
 )
-from sklearn.dummy import DummyClassifier, DummyRegressor
 from sklearn.linear_model import LinearRegression, LogisticRegression, Ridge
 from sklearn.pipeline import Pipeline
 
 from rtml.core.benchmarks import BenchmarkCase
+from rtml.core.datasets import Dataset
 from rtml.core.methods import MethodSpec
 from rtml.core.metrics import EvaluationMetrics
 from rtml.core.resampling import Resample
 from rtml.core.results import PredictionSet
 from rtml.core.runtime import RuntimeSpec
-from rtml.core.tasks import TaskType
-from rtml.methods.backends.base import BackendResult, MethodBackend
+from rtml.core.tasks import TaskSpec, TaskType
+from rtml.methods.backends.base import BackendRefitResult, BackendResult, MethodBackend
 from rtml.single_instance.preprocessing import build_preprocessor
 
 SUPPORTED_SKLEARN_MODEL_KINDS = {
@@ -103,9 +105,9 @@ def _make_prediction_set(
     resample: Resample,
     estimator: Pipeline,
 ) -> PredictionSet:
-    x_test = case.task.source_frame(case.dataset).iloc[resample.test_idx]
-    y_test = case.task.target_series(case.dataset)
-    y_true = None if y_test is None else y_test.iloc[resample.test_idx].to_numpy()
+    test_data = case.dataset[resample.test_idx]
+    x_test = test_data.loc[:, case.task.source]
+    y_true = None if case.task.target is None else test_data.loc[:, case.task.target].to_numpy()
 
     if case.task.task_type == TaskType.REGRESSION:
         values = estimator.predict(x_test)
@@ -187,8 +189,12 @@ class SklearnBackend(MethodBackend):
         if y is None:
             raise ValueError("sklearn method execution requires a supervised task target")
 
-        x_train = x.iloc[resample.train_idx]
-        y_train = y.iloc[resample.train_idx]
+        training_indices = resample.train_idx
+        if resample.valid_idx is not None:
+            training_indices = np.concatenate((training_indices, resample.valid_idx))
+        training_data = case.dataset[training_indices]
+        x_train = training_data.loc[:, case.task.source]
+        y_train = training_data.loc[:, case.task.target]
 
         fit_start = perf_counter()
         pipeline.fit(x_train, y_train)
