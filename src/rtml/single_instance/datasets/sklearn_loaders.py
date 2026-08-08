@@ -2,6 +2,7 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 import pandas as pd
+from sklearn import __version__ as sklearn_version
 from sklearn.datasets import (
     load_breast_cancer,
     load_diabetes,
@@ -13,7 +14,6 @@ from sklearn.datasets import (
     make_regression,
     make_s_curve,
 )
-from sklearn.model_selection import KFold, StratifiedKFold, train_test_split
 from sklearn.utils import Bunch
 
 from rtml.core.benchmarks import BenchmarkCase, BenchmarkSuite
@@ -110,6 +110,11 @@ def load_sklearn_dataset(
 
     dataset_metadata = {
         "source": "sklearn",
+        "source_identity": {
+            "source": "sklearn",
+            "loader": loader.__name__,
+            "sklearn_version": sklearn_version,
+        },
         "description": getattr(bunch, "DESCR", None),
         "target_column": target_column,
         **dict(metadata or {}),
@@ -144,6 +149,11 @@ def _load_all_numeric_dataset(
 
     dataset_metadata = {
         "source": "sklearn",
+        "source_identity": {
+            "source": "sklearn",
+            "loader": loader.__name__,
+            "sklearn_version": sklearn_version,
+        },
         "description": getattr(bunch, "DESCR", None),
         **dict(metadata or {}),
     }
@@ -250,6 +260,12 @@ def _make_numeric_regression_dataset(
         schema=FeatureSchema(features=features),
         metadata={
             "source": "sklearn",
+            "source_identity": {
+                "source": "sklearn",
+                "generator": metadata["generator"],
+                "parameters": dict(metadata),
+                "sklearn_version": sklearn_version,
+            },
             **dict(metadata),
         },
     )

@@ -287,6 +287,12 @@ def load_openml_benchmark_case(
         schema=schema,
         metadata={
             "source": "openml",
+            "source_identity": {
+                "source": "openml",
+                "dataset_id": openml_task.dataset_id,
+                "version": getattr(openml_dataset, "version", None),
+                "md5_checksum": getattr(openml_dataset, "md5_checksum", None),
+            },
             "openml_dataset_id": openml_task.dataset_id,
             "openml_task_id": openml_task.task_id,
             "suite_id": suite_id,

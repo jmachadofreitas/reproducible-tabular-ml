@@ -124,7 +124,7 @@ class ResamplingPlan:
     task_name: str
     spec: ResamplingSpec
     resamples: list[Resample]
-    fingerprint: str | None = None
+    fingerprint: str = field(init=False)
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -135,18 +135,14 @@ class ResamplingPlan:
         if len(resample_ids) != len(set(resample_ids)):
             raise ValueError(f"resample ids must be unique: {resample_ids}")
 
-        if self.fingerprint is None:
-            self.fingerprint = self._compute_fingerprint()
+        self.fingerprint = self._compute_fingerprint()
 
-    # The fingerprint depends only on the split definition and row indices.
+    # The fingerprint identifies the materialized splits, not the configuration
+    # that happened to produce them.
     def _compute_fingerprint(self) -> str:
         payload = {
             "dataset_name": self.dataset_name,
             "task_name": self.task_name,
-            "strategy": self.spec.strategy.value,
-            "n_repeats": self.spec.n_repeats,
-            "n_folds": self.spec.n_folds,
-            "n_samples": self.spec.n_samples,
             "resamples": [
                 {
                     "id": resample.id,

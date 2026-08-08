@@ -43,8 +43,12 @@ def capture_runtime(
     *,
     packages: tuple[str, ...] = DEFAULT_RUNTIME_PACKAGES,
     code_version: str | None = None,
+    hints: RuntimeSpec | None = None,
 ) -> RuntimeSpec:
-    """Capture a small observed runtime snapshot for run evidence."""
+    """Capture environment evidence and retain backend-facing runtime hints."""
+    recorded_code_version = code_version
+    if recorded_code_version is None and hints is not None:
+        recorded_code_version = hints.code_version
     package_versions: dict[str, str] = {}
     for package in packages:
         try:
@@ -55,5 +59,10 @@ def capture_runtime(
         python_version=sys.version.split()[0],
         package_versions=package_versions,
         platform=platform_module.platform(),
-        code_version=code_version,
+        device=None if hints is None else hints.device,
+        accelerator=None if hints is None else hints.accelerator,
+        precision=None if hints is None else hints.precision,
+        deterministic=None if hints is None else hints.deterministic,
+        num_threads=None if hints is None else hints.num_threads,
+        code_version=recorded_code_version,
     )

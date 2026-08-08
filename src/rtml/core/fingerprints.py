@@ -29,7 +29,7 @@ def stable_jsonable(value: Any) -> Any:
         return stable_jsonable(value.item())
     if value is None or isinstance(value, str | int | float | bool):
         return value
-    return str(value)
+    raise TypeError(f"cannot create a stable fingerprint from {type(value).__name__}")
 
 
 def stable_fingerprint(value: Any) -> str:
@@ -43,15 +43,18 @@ def stable_fingerprint(value: Any) -> str:
 
 
 def fingerprint_dataset(dataset: Any) -> str:
-    """Fingerprint dataset identity, schema, shape, and provenance metadata.
-
-    This intentionally avoids hashing all dataframe values. Full content hashes
-    can be added later as explicit dataset metadata when the cost is acceptable.
-    """
-    existing = getattr(dataset, "metadata", {}).get("fingerprint")
+    """Fingerprint a dataset from explicit, source, or local content identity."""
+    metadata = getattr(dataset, "metadata", {})
+    existing = metadata.get("fingerprint")
     if existing:
         return str(existing)
     return stable_fingerprint(dataset.fingerprint_payload())
+
+
+def fingerprint_frame(frame: pd.DataFrame) -> str:
+    """Hash dataframe values and row order for datasets without source identity."""
+    row_hashes = pd.util.hash_pandas_object(frame, index=True).to_numpy()
+    return f"sha256:{hashlib.sha256(row_hashes.tobytes()).hexdigest()}"
 
 
 def fingerprint_task(task: Any) -> str:
@@ -69,8 +72,3 @@ def fingerprint_method(method: Any) -> str:
             "fit": method.fit,
         }
     )
-
-
-def fingerprint_runtime(runtime: Any) -> str:
-    """Fingerprint the runtime context recorded for a run."""
-    return stable_fingerprint(runtime)

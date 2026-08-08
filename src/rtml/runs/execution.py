@@ -13,13 +13,11 @@ from rtml.core.benchmarks import BenchmarkCase, BenchmarkSuite
 from rtml.core.fingerprints import (
     fingerprint_dataset,
     fingerprint_method,
-    fingerprint_runtime,
     fingerprint_task,
     stable_fingerprint,
 )
 from rtml.core.methods import MethodSpec
 from rtml.core.results import PredictionSet
-from rtml.results.artifacts import save_prediction_set
 from rtml.core.runs import ExecutionPlan, ExecutionResources, RunRecord, RunResult, RunSpec
 from rtml.core.runtime import RuntimeSpec, capture_runtime
 from rtml.core.studies import Study
@@ -43,6 +41,8 @@ def _validate_method_backend(method: MethodSpec, backend: MethodBackend) -> None
             f"received {backend.name!r}"
         )
     backend.validate_method(method)
+
+
 def _logger_run_context(
     logger: Logger | None,
     *,
@@ -118,7 +118,10 @@ def _with_prediction_evidence(predictions: PredictionSet, record: RunRecord) -> 
         subgroups={**dict(predictions.subgroups or {})},
         metadata={
             **dict(predictions.metadata or {}),
-            **prediction_evidence_metadata(record),
+            "run_id": record.run_id,
+            "case_name": record.case_name,
+            "fingerprints": dict(record.fingerprints),
+            "seed": record.seed,
         },
     )
 
@@ -126,29 +129,28 @@ def _with_prediction_evidence(predictions: PredictionSet, record: RunRecord) -> 
 def build_run_id(
     *,
     case_name: str,
-    dataset_fingerprint: str,
-    task_fingerprint: str,
-    resampling_plan_fingerprint: str,
     resample_id: str,
     method_name: str,
-    method_fingerprint: str,
     seed: int,
-    runtime_fingerprint: str,
+    fingerprints: Mapping[str, str],
 ) -> str:
     """Build a stable run id from planned inputs."""
     payload = {
-        "case_name": case_name,
-        "dataset_fingerprint": dataset_fingerprint,
-        "task_fingerprint": task_fingerprint,
-        "resampling_plan_fingerprint": resampling_plan_fingerprint,
+        "fingerprints": dict(fingerprints),
         "resample_id": resample_id,
-        "method_name": method_name,
-        "method_fingerprint": method_fingerprint,
         "seed": seed,
-        "runtime_fingerprint": runtime_fingerprint,
     }
     digest = stable_fingerprint(payload).removeprefix("sha256:")[:16]
     return f"{case_name}:{method_name}:{resample_id}:{seed}:sha256:{digest}"
+
+
+def _run_fingerprints(case: BenchmarkCase, method: MethodSpec) -> dict[str, str]:
+    return {
+        "dataset": fingerprint_dataset(case.dataset),
+        "task": fingerprint_task(case.task),
+        "resampling": case.resampling.fingerprint or "",
+        "method": fingerprint_method(method),
+    }
 
 
 def _primary_metric_direction(case: BenchmarkCase) -> bool | None:
@@ -171,43 +173,29 @@ def build_run_record(
     prediction_path: str | None = None,
 ) -> RunRecord:
 
-    observed_runtime = runtime or capture_runtime()
+    observed_runtime = capture_runtime(hints=runtime)
     resample_id = backend_result.predictions.resample_id
-    dataset_fingerprint = fingerprint_dataset(case.dataset)
-    task_fingerprint = fingerprint_task(case.task)
-    resampling_fingerprint = case.resampling.fingerprint or ""
-    method_fingerprint = fingerprint_method(method)
-    runtime_fingerprint = fingerprint_runtime(observed_runtime)
-    run_id_runtime_fingerprint = (
-        fingerprint_runtime(runtime) if runtime is not None else stable_fingerprint(None)
-    )
+    fingerprints = _run_fingerprints(case, method)
     return RunRecord(
         run_id=build_run_id(
             case_name=case.name,
-            dataset_fingerprint=dataset_fingerprint,
-            task_fingerprint=task_fingerprint,
-            resampling_plan_fingerprint=resampling_fingerprint,
             resample_id=resample_id,
             method_name=method.name,
-            method_fingerprint=method_fingerprint,
             seed=seed,
-            runtime_fingerprint=run_id_runtime_fingerprint,
+            fingerprints=fingerprints,
         ),
         case_name=case.name,
         dataset_name=case.dataset.name,
-        dataset_fingerprint=dataset_fingerprint,
         task_name=case.task.name,
         task_type=case.task.task_type,
-        task_fingerprint=task_fingerprint,
         primary_metric=case.task.primary_metric,
-        resampling_plan_fingerprint=resampling_fingerprint,
         resample_id=resample_id,
         method=method,
-        method_fingerprint=method_fingerprint,
         seed=seed,
+        fingerprints=fingerprints,
         runtime=observed_runtime,
-        runtime_fingerprint=runtime_fingerprint,
         status="success",
+        primary_metric_greater_is_better=_primary_metric_direction(case),
         metrics=backend_result.metrics,
         fit_time=backend_result.fit_time,
         predict_time=backend_result.predict_time,
@@ -225,43 +213,29 @@ def build_failed_run_record(
     runtime: RuntimeSpec | None = None,
     error: Exception,
 ) -> RunRecord:
-    observed_runtime = runtime or capture_runtime()
-    dataset_fingerprint = fingerprint_dataset(case.dataset)
-    task_fingerprint = fingerprint_task(case.task)
-    resampling_fingerprint = case.resampling.fingerprint or ""
-    method_fingerprint = fingerprint_method(method)
-    runtime_fingerprint = fingerprint_runtime(observed_runtime)
-    run_id_runtime_fingerprint = (
-        fingerprint_runtime(runtime) if runtime is not None else stable_fingerprint(None)
-    )
+    observed_runtime = capture_runtime(hints=runtime)
+    fingerprints = _run_fingerprints(case, method)
     error_message = str(error) or repr(error)
     return RunRecord(
         run_id=build_run_id(
             case_name=case.name,
-            dataset_fingerprint=dataset_fingerprint,
-            task_fingerprint=task_fingerprint,
-            resampling_plan_fingerprint=resampling_fingerprint,
             resample_id=resample_id,
             method_name=method.name,
-            method_fingerprint=method_fingerprint,
             seed=seed,
-            runtime_fingerprint=run_id_runtime_fingerprint,
+            fingerprints=fingerprints,
         ),
         case_name=case.name,
         dataset_name=case.dataset.name,
-        dataset_fingerprint=dataset_fingerprint,
         task_name=case.task.name,
         task_type=case.task.task_type,
-        task_fingerprint=task_fingerprint,
         primary_metric=case.task.primary_metric,
-        resampling_plan_fingerprint=resampling_fingerprint,
         resample_id=resample_id,
         method=method,
-        method_fingerprint=method_fingerprint,
         seed=seed,
+        fingerprints=fingerprints,
         runtime=observed_runtime,
-        runtime_fingerprint=runtime_fingerprint,
         status="failed",
+        primary_metric_greater_is_better=_primary_metric_direction(case),
         error=error_message,
         metadata={"error_type": type(error).__name__},
     )
@@ -363,7 +337,11 @@ def run_method(
             runtime=runtime,
             prediction_dir=prediction_dir,
             logger=logger,
-            metadata=metadata,
+            metadata={
+                **case.metadata,
+                **method.metadata,
+                **dict(metadata or {}),
+            },
             subgroup_columns=subgroup_columns,
         )
 
@@ -454,14 +432,6 @@ def _execute_run_spec(
             return result
 
 
-def _execution_metadata(
-    *,
-    method: MethodSpec,
-    plan_metadata: Mapping[str, Any],
-) -> dict[str, Any]:
-    return {**method.metadata, **dict(plan_metadata)}
-
-
 class SequentialExecutor:
     """Execute an execution plan in-process."""
 
@@ -492,10 +462,11 @@ class SequentialExecutor:
                     prediction_dir,
                     continue_on_error=continue_on_error,
                     logger=logger,
-                    metadata=_execution_metadata(
-                        method=run_spec.method,
-                        plan_metadata=plan.metadata,
-                    ),
+                    metadata={
+                        **run_spec.case.metadata,
+                        **run_spec.method.metadata,
+                        **plan.metadata,
+                    },
                     subgroup_columns=subgroup_columns,
                 )
             )
@@ -565,22 +536,21 @@ class RayExecutor:
                     prediction_dir,
                     continue_on_error,
                     self.worker_logger_config,
-                    _execution_metadata(
-                        method=run_spec.method,
-                        plan_metadata=plan.metadata,
-                    ),
+                    {
+                        **run_spec.case.metadata,
+                        **run_spec.method.metadata,
+                        **plan.metadata,
+                    },
                     subgroup_columns,
                 )
             )
 
-        raw_results = self._get_results(
         results = self._get_results(
             ray,
             refs,
             show_progress=show_progress,
             label=f"{plan.name} ({self.name})",
         )
-        results = _attach_plan_metadata(raw_results, plan.metadata)
         if not self.worker_logger_config:
             _log_results(results, logger)
         return results

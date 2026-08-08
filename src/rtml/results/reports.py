@@ -33,16 +33,11 @@ def run_record_row(record: RunRecord) -> Row:
         "dataset_name": record.dataset_name,
         "task_name": record.task_name,
         "task_type": record.task_type.value,
-        "dataset_fingerprint": record.dataset_fingerprint,
-        "task_fingerprint": record.task_fingerprint,
         "method_name": record.method.name,
-        "method_fingerprint": record.method_fingerprint,
         "model_kind": record.method.model.kind,
         "model_backend": record.method.model.backend,
         "resample_id": record.resample_id,
-        "resampling_plan_fingerprint": record.resampling_plan_fingerprint,
         "seed": record.seed,
-        "runtime_fingerprint": record.runtime_fingerprint,
         "status": record.status,
         "primary_metric": record.primary_metric or "",
         "primary_metric_greater_is_better": record.primary_metric_greater_is_better,
@@ -134,6 +129,11 @@ def aggregate_run_summary(
         aggregate_row["n_success"] = sum(row.get("status") == "success" for row in group_rows)
         aggregate_row["n_failed"] = sum(row.get("status") != "success" for row in group_rows)
         _copy_unique_field(aggregate_row, group_rows, "task_type")
+        _copy_unique_field(
+            aggregate_row,
+            group_rows,
+            "primary_metric_greater_is_better",
+        )
         _copy_unique_metadata_fields(aggregate_row, group_rows)
         _copy_primary_metric_summary(aggregate_row, group_rows)
 

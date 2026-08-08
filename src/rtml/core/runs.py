@@ -60,6 +60,8 @@ class ExecutionPlan:
         metadata: Mapping[str, Any] | None = None,
     ) -> ExecutionPlan:
         """Expand a suite and method list into concrete `RunSpec` objects."""
+        if len(seeds) != len(set(seeds)):
+            raise ValueError(f"execution seeds must be unique: {list(seeds)}")
         run_specs: list[RunSpec] = []
         runtime_map = runtime_specs or {}
         resource_map = scheduler_resources or {}
@@ -85,7 +87,11 @@ class ExecutionPlan:
                                 scheduler_resources=method_resources,
                             )
                         )
-        return cls(name=name, runs=tuple(run_specs), metadata=dict(metadata or {}))
+        return cls(
+            name=name,
+            runs=tuple(run_specs),
+            metadata={**suite.metadata, **dict(metadata or {})},
+        )
 
     @classmethod
     def from_study(
@@ -122,18 +128,14 @@ class RunRecord:
     run_id: str
     case_name: str
     dataset_name: str
-    dataset_fingerprint: str
     task_name: str
     task_type: TaskType
-    task_fingerprint: str
     primary_metric: str | None
-    resampling_plan_fingerprint: str
     resample_id: str
     method: MethodSpec
-    method_fingerprint: str
     seed: int
+    fingerprints: dict[str, str]
     runtime: RuntimeSpec
-    runtime_fingerprint: str
     status: Literal["success", "failed"]
     primary_metric_greater_is_better: bool | None = None
     metrics: dict[str, float] = field(default_factory=dict)

@@ -6,6 +6,8 @@ from typing import Any, Literal, overload
 import numpy as np
 import pandas as pd
 
+from rtml.core.fingerprints import fingerprint_frame
+
 
 class FeatureKind(str, Enum):
     ID = "id"
@@ -267,28 +269,40 @@ class Dataset:
 
     def fingerprint_payload(self) -> dict[str, Any]:
         """Return the dataset structure and provenance used for its fingerprint."""
-        return {
+        source_identity = self.metadata.get("source_identity")
+        payload = {
             "name": self.name,
             "shape": tuple(self.data.shape),
             "columns": [str(column) for column in self.data.columns],
             "schema": self.schema,
             "row_id": self.row_id,
-            "metadata": {
-                key: value for key, value in self.metadata.items() if key != "fingerprint"
-            },
         }
+        if source_identity is not None:
+            payload["source_identity"] = source_identity
+        else:
+            payload["content"] = fingerprint_frame(self.data)
+            payload["metadata"] = {
+                key: value for key, value in self.metadata.items() if key != "fingerprint"
+            }
+        return payload
 
     def select_rows(self, rows: Sequence[int] | np.ndarray | slice) -> Dataset:
         if isinstance(rows, slice):
             selected = self.data.iloc[rows]
         else:
             selected = self.data.iloc[list(rows)]
+        metadata = dict(self.metadata)
+        if "source_identity" in metadata:
+            metadata["source_identity"] = {
+                "parent": metadata["source_identity"],
+                "row_positions": positions,
+            }
         return Dataset(
             name=self.name,
             data=selected,
             schema=self.schema,
             row_id=self.row_id,
-            metadata=self.metadata,
+            metadata=metadata,
         )
 
     @overload
