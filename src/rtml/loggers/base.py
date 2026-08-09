@@ -1,3 +1,5 @@
+import sys
+import warnings
 from collections.abc import Mapping, Sequence
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
@@ -69,7 +71,8 @@ class Logger:
         """Open one logical run across every writer."""
         with ExitStack() as stack:
             active_runs = [
-                stack.enter_context(writer.start_run(run_name=run_name)) for writer in self.writers
+                stack.enter_context(_writer_run(writer, run_name=run_name))
+                for writer in self.writers
             ]
             yield active_runs
 
@@ -80,7 +83,10 @@ class Logger:
         step: int | None = None,
     ) -> None:
         for writer in self.writers:
-            writer.log_metrics(metrics, step=step)
+            try:
+                writer.log_metrics(metrics, step=step)
+            except Exception as exc:
+                _warn_writer_failure(writer, "log metrics", exc)
 
     def log_run(
         self,
@@ -88,7 +94,14 @@ class Logger:
         *,
         artifact_paths: Sequence[str | Path] = (),
     ) -> list[str | None]:
-        return [writer.log_run(record, artifact_paths=artifact_paths) for writer in self.writers]
+        run_ids = []
+        for writer in self.writers:
+            try:
+                run_ids.append(writer.log_run(record, artifact_paths=artifact_paths))
+            except Exception as exc:
+                _warn_writer_failure(writer, "log final run", exc)
+                run_ids.append(None)
+        return run_ids
 
     def log_artifact(
         self,
@@ -97,4 +110,40 @@ class Logger:
         artifact_path: str | None = None,
     ) -> None:
         for writer in self.writers:
-            writer.log_artifact(path, artifact_path=artifact_path)
+            try:
+                writer.log_artifact(path, artifact_path=artifact_path)
+            except Exception as exc:
+                _warn_writer_failure(writer, "log artifact", exc)
+
+
+@contextmanager
+def _writer_run(writer: LogWriter, *, run_name: str | None) -> Any:
+    try:
+        context = writer.start_run(run_name=run_name)
+        active_run = context.__enter__()
+    except Exception as exc:
+        _warn_writer_failure(writer, "start run", exc)
+        yield None
+        return
+
+    try:
+        yield active_run
+    except BaseException:
+        try:
+            context.__exit__(*sys.exc_info())
+        except Exception as exc:
+            _warn_writer_failure(writer, "end run", exc)
+        raise
+    else:
+        try:
+            context.__exit__(None, None, None)
+        except Exception as exc:
+            _warn_writer_failure(writer, "end run", exc)
+
+
+def _warn_writer_failure(writer: LogWriter, operation: str, error: Exception) -> None:
+    warnings.warn(
+        f"{type(writer).__name__} failed to {operation}: {error}",
+        RuntimeWarning,
+        stacklevel=3,
+    )
