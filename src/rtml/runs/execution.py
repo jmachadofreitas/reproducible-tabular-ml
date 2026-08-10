@@ -245,7 +245,7 @@ def _run_method_in_context(
     *,
     case: BenchmarkCase,
     method: MethodSpec,
-    backends: Sequence[MethodBackend],
+    backend: MethodBackend,
     resample_id: str | None = None,
     seed: int = 0,
     runtime: RuntimeSpec | None = None,
@@ -383,7 +383,7 @@ def _execute_run_spec(
     run_spec: RunSpec,
     prediction_dir: str | Path | None,
     *,
-    backends: Sequence[MethodBackend],
+    backend: MethodBackend | None,
     continue_on_error: bool,
     logger: Logger | None = None,
     metadata: Mapping[str, Any] | None = None,
@@ -396,10 +396,15 @@ def _execute_run_spec(
         resample_id=run_spec.resample_id,
     ):
         try:
+            if backend is None:
+                raise ValueError(
+                    f"no method backend named {run_spec.method.model.backend!r} "
+                    f"for method {run_spec.method.name!r}"
+                )
             return _run_method_in_context(
                 case=run_spec.case,
                 method=run_spec.method,
-                backends=backends,
+                backend=backend,
                 resample_id=run_spec.resample_id,
                 seed=run_spec.seed,
                 runtime=run_spec.runtime,
@@ -448,6 +453,7 @@ class SequentialExecutor:
         show_progress: bool = False,
         subgroup_columns: Sequence[str] | None = None,
     ) -> list[RunResult]:
+        backend_by_name = _backend_by_name(backends)
         results = []
         for run_spec in tqdm(
             plan.runs,
@@ -460,6 +466,7 @@ class SequentialExecutor:
                 _execute_run_spec(
                     run_spec,
                     prediction_dir,
+                    backend=backend_by_name.get(run_spec.method.model.backend),
                     continue_on_error=continue_on_error,
                     logger=logger,
                     metadata={
@@ -516,6 +523,7 @@ class RayExecutor:
         if self.init and not ray.is_initialized():
             ray.init(address=self.address, **self.init_kwargs)
 
+        backend_by_name = _backend_by_name(backends)
         # Cases can carry full data frames. Put each shared case once and pass
         # object refs to per-resample/per-seed tasks.
         case_refs = self._put_cases(ray, plan.runs)
