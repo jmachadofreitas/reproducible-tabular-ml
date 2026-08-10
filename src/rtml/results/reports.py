@@ -346,11 +346,13 @@ def _add_primary_metric_ranks(
 
     overall_groups: dict[tuple[Any, ...], list[Row]] = {}
     for row in rows:
-        if row.get("primary_metric_rank_by_dataset") is not None:
-            key = tuple(row.get(field, "") for field in overall_rank_group_by)
-            overall_groups.setdefault(key, []).append(row)
+        key = tuple(row.get(field, "") for field in overall_rank_group_by)
+        overall_groups.setdefault(key, []).append(row)
 
     for group_rows in overall_groups.values():
+        comparison_keys = {
+            tuple(row.get(field, "") for field in rank_group_by) for row in group_rows
+        }
         rank_by_method: dict[Any, list[float]] = {}
         for row in group_rows:
             method = row.get(method_field)
@@ -359,8 +361,10 @@ def _add_primary_metric_ranks(
                 rank_by_method.setdefault(method, []).append(rank)
 
         method_rows: list[Row] = []
-        for method, ranks in rank_by_method.items():
-            mean_rank = sum(ranks) / len(ranks)
+        methods = {row.get(method_field) for row in group_rows if row.get(method_field) is not None}
+        for method in methods:
+            ranks = rank_by_method.get(method, [])
+            mean_rank = None if not ranks else sum(ranks) / len(ranks)
             for row in group_rows:
                 if row.get(method_field) == method:
                     row["primary_metric_rank_count"] = len(ranks)
