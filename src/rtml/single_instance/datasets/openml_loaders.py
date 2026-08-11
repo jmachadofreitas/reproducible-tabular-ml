@@ -7,14 +7,13 @@ import numpy as np
 import openml
 import pandas as pd
 
-from rtml.core.benchmarks import BenchmarkSuite, BenchmarkCase
+from rtml.core.benchmarks import BenchmarkCase, BenchmarkSuite
 from rtml.core.datasets import Dataset, FeatureInfo, FeatureKind, FeatureSchema
 from rtml.core.resampling import (
     Resample,
     ResamplingPlan,
     ResamplingSpec,
     ResamplingStrategy,
-    create_openml_resample_id,
 )
 from rtml.core.tasks import MetricSpec, TaskSpec, TaskType
 
@@ -31,6 +30,11 @@ OPENML_METRICS = {
     "predictive_accuracy": ("accuracy", True),
     "root_mean_squared_error": ("rmse", False),
 }
+
+
+def _openml_resample_id(*, repeat: int, fold: int, sample: int) -> str:
+    return f"repeat_{repeat:02d}_fold_{fold:02d}_sample_{sample:02d}"
+
 
 def configure_openml_storage(
     root_cache_directory: str | Path = DEFAULT_OPENML_DATA_DIR,
@@ -138,7 +142,7 @@ def _build_task_spec(
     task = TaskSpec(
         name=f"{dataset.name}_{target_name}",
         task_type=task_type,
-        source=[column for column in dataset.columns if column != target_name],
+        source=[str(column) for column in dataset.data.columns if column != target_name],
         target=target_name,
         metrics=metrics,
         primary_metric=primary_metric,
@@ -196,7 +200,7 @@ def _build_resampling_plan(
                 )
                 resamples.append(
                     Resample(
-                        id=create_openml_resample_id(repeat=repeat, fold=fold, sample=sample),
+                        id=_openml_resample_id(repeat=repeat, fold=fold, sample=sample),
                         train_idx=train_idx,
                         test_idx=test_idx,
                         metadata={"repeat": repeat, "fold": fold, "sample": sample},

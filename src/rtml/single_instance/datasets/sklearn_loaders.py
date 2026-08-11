@@ -399,20 +399,6 @@ def build_sklearn_benchmark_case(
     )
 
 
-def build_sklearn_benchmark_suite(
-    *,
-    name: str,
-    cases: list[BenchmarkCase],
-    metadata: Mapping[str, Any] | None = None,
-) -> BenchmarkSuite:
-    """Collect multiple sklearn benchmark cases into one suite."""
-    return BenchmarkSuite(
-        name=name,
-        cases=list(cases),
-        metadata={"source": "sklearn", **dict(metadata or {})},
-    )
-
-
 def load_sklearn_classification_suite() -> BenchmarkSuite:
     """Create a small local sklearn classification suite."""
     resampling_spec = ResamplingSpec(
@@ -441,7 +427,11 @@ def load_sklearn_classification_suite() -> BenchmarkSuite:
             )
         )
 
-    return build_sklearn_benchmark_suite(name="sklearn classification", cases=cases)
+    return BenchmarkSuite(
+        name="sklearn classification",
+        cases=cases,
+        metadata={"source": "sklearn"},
+    )
 
 
 def load_sklearn_regression_suite() -> BenchmarkSuite:
@@ -532,4 +522,8 @@ def load_sklearn_regression_suite() -> BenchmarkSuite:
         )
         for dataset, task in dataset_tasks
     ]
-    return build_sklearn_benchmark_suite(name="sklearn regression", cases=cases)
+    return BenchmarkSuite(
+        name="sklearn regression",
+        cases=cases,
+        metadata={"source": "sklearn"},
+    )
