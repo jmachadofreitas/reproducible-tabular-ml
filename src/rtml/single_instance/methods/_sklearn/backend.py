@@ -98,6 +98,35 @@ def build_sklearn_estimator(
     raise AssertionError(f"unhandled sklearn model kind {model_kind!r}")
 
 
+def build_sklearn_pipeline(
+    *,
+    dataset: Dataset,
+    task: TaskSpec,
+    method: MethodSpec,
+    seed: int = 0,
+    runtime: RuntimeSpec | None = None,
+) -> Pipeline:
+    """Build the complete unfitted sklearn method."""
+    if method.model.backend != "sklearn":
+        raise ValueError(f"cannot build sklearn pipeline for backend {method.model.backend!r}")
+
+    transform_config = dict(method.transform)
+    policy = transform_config.pop("policy", "linear_default")
+    preprocessor = build_preprocessor(
+        dataset=dataset,
+        task=task,
+        policy=policy,
+        options=transform_config,
+    )
+    estimator = build_sklearn_estimator(
+        task_type=task.task_type,
+        method=method,
+        seed=seed,
+        runtime=runtime,
+    )
+    return Pipeline(steps=[("preprocessor", preprocessor), ("model", estimator)])
+
+
 def _make_prediction_set(
     *,
     case: BenchmarkCase,
@@ -166,27 +195,19 @@ class SklearnBackend(MethodBackend):
     ) -> BackendResult:
         self.validate_method(method)
         case.task.validate_columns(case.dataset)
+        if case.task.sample_weight is not None:
+            raise ValueError("sklearn backend does not support sample-weighted tasks")
         resample = case.resampling.get_resample(resample_id)
 
-        transform_config = dict(method.transform)
-        policy = transform_config.pop("policy", "linear_default")
-        preprocessor = build_preprocessor(
+        pipeline = build_sklearn_pipeline(
             dataset=case.dataset,
             task=case.task,
-            policy=policy,
-            options=transform_config,
-        )
-        estimator = build_sklearn_estimator(
-            task_type=case.task.task_type,
             method=method,
             seed=seed,
             runtime=runtime,
         )
-        pipeline = Pipeline(steps=[("preprocessor", preprocessor), ("model", estimator)])
 
-        x = case.task.source_frame(case.dataset)
-        y = case.task.target_series(case.dataset)
-        if y is None:
+        if case.task.target is None:
             raise ValueError("sklearn method execution requires a supervised task target")
 
         training_indices = resample.train_idx
@@ -209,13 +230,13 @@ class SklearnBackend(MethodBackend):
         )
         predict_time = perf_counter() - predict_start
 
-        metrics = compute_metrics(case.task.metrics, predictions)
+        metrics = EvaluationMetrics(case.task.metrics).compute(predictions)
         return BackendResult(
             predictions=predictions,
             metrics=metrics,
             fit_time=fit_time,
             predict_time=predict_time,
-            metadata={"preprocessing_policy": policy},
+            metadata={"preprocessing_policy": method.transform.get("policy", "linear_default")},
         )
 
     def refit(
