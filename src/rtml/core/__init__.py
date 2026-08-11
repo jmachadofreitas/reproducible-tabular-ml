@@ -6,7 +6,6 @@ from rtml.core.resampling import (
     ResamplingPlan,
     ResamplingSpec,
     ResamplingStrategy,
-    create_openml_resample_id,
 )
 from rtml.core.results import PredictionSet
 from rtml.core.runs import ExecutionPlan, ExecutionResources, RunRecord, RunResult, RunSpec
@@ -40,5 +39,4 @@ __all__ = [
     "StudyKind",
     "TaskSpec",
     "TaskType",
-    "create_openml_resample_id",
 ]

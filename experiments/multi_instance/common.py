@@ -4,7 +4,6 @@ from typing import Any
 
 from rtml.builders import (
     build_executor,
-    build_logger,
     build_methods,
     build_runtime_specs,
     build_scheduler_resources,
@@ -12,6 +11,7 @@ from rtml.builders import (
 )
 from rtml.core.benchmarks import BenchmarkSuite
 from rtml.core.runs import RunResult
+from rtml.loggers import build_logger
 from rtml.multi_instance.datasets.base import MultiInstanceDataset
 from rtml.multi_instance.datasets.classic import load_classic_mil_suite
 from rtml.multi_instance.datasets.classic.constants import (
@@ -23,7 +23,6 @@ from rtml.multi_instance.methods import default_multi_instance_backends
 from rtml.multi_instance.tasks import MultiInstanceTask
 from rtml.results.reports import save_aggregate_summary, save_run_summary
 from rtml.runs import run_study
-
 
 PARADIGM = "multi_instance"
 

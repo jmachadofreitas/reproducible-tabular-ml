@@ -1,22 +1,20 @@
-from __future__ import annotations
-
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from rtml.single_instance.benchmarks.builders import build_benchmark_suite
 from rtml.builders import (
     build_executor,
-    build_logger,
     build_methods,
     build_runtime_specs,
     build_scheduler_resources,
     build_study,
 )
+from rtml.core.runs import RunResult
+from rtml.loggers import build_logger
 from rtml.results.reports import save_aggregate_summary, save_run_summary
 from rtml.results.subgroups import save_subgroup_summary
 from rtml.runs import run_study
-from rtml.core.runs import RunResult
+from rtml.single_instance.benchmarks.builders import build_benchmark_suite
 from rtml.single_instance.methods import default_single_instance_backends
 
 PARADIGM = "single_instance"

@@ -8,7 +8,6 @@ from rtml.core.methods import MethodSpec, ModelSpec
 from rtml.core.runs import ExecutionResources
 from rtml.core.runtime import RuntimeSpec
 from rtml.core.studies import Study, StudyKind
-from rtml.loggers import build_logger as build_logger
 from rtml.runs import RayExecutor, RunExecutor, SequentialExecutor
 
 
@@ -53,63 +52,45 @@ def build_study(
     )
 
 
-def _defaulted_method_mapping(
-    config: Mapping[str, Any] | None,
-    *,
-    nested_fields: Sequence[str] = (),
-) -> dict[str, dict[str, Any]]:
-    if config is None:
-        return {}
+def build_scheduler_resources(config: Mapping[str, Any] | None) -> dict[str, ExecutionResources]:
+    """Build scheduler resource hints keyed by exact method name."""
+    config = config or {}
     defaults = dict(config.get("defaults") or {})
     methods = dict(config.get("methods", config) or {})
     methods.pop("defaults", None)
-
-    merged = {}
+    resources = {}
     for name, values in methods.items():
-        method_values = dict(values or {})
-        merged_values = {**defaults, **method_values}
-        for field in nested_fields:
-            if field in defaults or field in method_values:
-                merged_values[field] = {
-                    **dict(defaults.get(field) or {}),
-                    **dict(method_values.get(field) or {}),
-                }
-        merged[str(name)] = merged_values
-    return merged
-
-
-def build_scheduler_resources(config: Mapping[str, Any] | None) -> dict[str, ExecutionResources]:
-    """Build scheduler resource hints keyed by exact method name."""
-    return {
-        name: ExecutionResources(
-            num_cpus=resource.get("num_cpus"),
-            num_gpus=resource.get("num_gpus"),
-            memory=resource.get("memory"),
-            custom=dict(resource.get("custom") or {}),
+        method = dict(values or {})
+        resources[str(name)] = ExecutionResources(
+            num_cpus=method.get("num_cpus", defaults.get("num_cpus")),
+            num_gpus=method.get("num_gpus", defaults.get("num_gpus")),
+            memory=method.get("memory", defaults.get("memory")),
+            custom={
+                **dict(defaults.get("custom") or {}),
+                **dict(method.get("custom") or {}),
+            },
         )
-        for name, resource in _defaulted_method_mapping(config, nested_fields=("custom",)).items()
-    }
+    return resources
 
 
 def build_runtime_specs(config: Mapping[str, Any] | None) -> dict[str, RuntimeSpec]:
     """Build runtime hints keyed by exact method name."""
-    return {
-        name: RuntimeSpec(
-            python_version=runtime.get("python_version"),
-            package_versions=dict(runtime.get("package_versions") or {}),
-            platform=runtime.get("platform"),
-            device=runtime.get("device"),
-            accelerator=runtime.get("accelerator"),
-            precision=runtime.get("precision"),
-            deterministic=runtime.get("deterministic"),
-            num_threads=runtime.get("num_threads"),
-            code_version=runtime.get("code_version"),
+    config = config or {}
+    defaults = dict(config.get("defaults") or {})
+    methods = dict(config.get("methods", config) or {})
+    methods.pop("defaults", None)
+    runtimes = {}
+    for name, values in methods.items():
+        method = {**defaults, **dict(values or {})}
+        runtimes[str(name)] = RuntimeSpec(
+            device=method.get("device"),
+            accelerator=method.get("accelerator"),
+            precision=method.get("precision"),
+            deterministic=method.get("deterministic"),
+            num_threads=method.get("num_threads"),
+            code_version=method.get("code_version"),
         )
-        for name, runtime in _defaulted_method_mapping(
-            config,
-            nested_fields=("package_versions",),
-        ).items()
-    }
+    return runtimes
 
 
 def build_executor(
