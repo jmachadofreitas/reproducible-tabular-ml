@@ -4,9 +4,10 @@ from pathlib import Path
 
 DEFAULT_CLASSIC_MIL_DATA_DIR = Path("data/multi_instance/classic_mil")
 CLASSIC_MIL_ARCHIVE_NAME = "multi-instance.zip"
+CLASSIC_MIL_RELEASE = "classic-mil-v1"
 CLASSIC_MIL_ARCHIVE_URLS = (
     "https://github.com/jmachadofreitas/tiny-datasets/releases/download/"
-    "classic-mil-v1/multi-instance.zip",
+    f"{CLASSIC_MIL_RELEASE}/multi-instance.zip",
     "https://sourceforge.net/projects/weka/files/datasets/multi-instance/"
     "multi-instance.zip/download",
 )

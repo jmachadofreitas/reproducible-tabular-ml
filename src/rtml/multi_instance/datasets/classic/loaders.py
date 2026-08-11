@@ -7,7 +7,11 @@ import pandas as pd
 from rtml.core.datasets import FeatureInfo, FeatureKind, FeatureSchema
 from rtml.core.tasks import MetricSpec, TaskType
 from rtml.multi_instance.datasets.base import MultiInstanceDataset
-from rtml.multi_instance.datasets.classic.constants import DEFAULT_CLASSIC_MIL_DATA_DIR
+from rtml.multi_instance.datasets.classic.constants import (
+    CLASSIC_MIL_ARCHIVE_SHA256,
+    CLASSIC_MIL_RELEASE,
+    DEFAULT_CLASSIC_MIL_DATA_DIR,
+)
 from rtml.multi_instance.datasets.classic.downloader import classic_mil_arff_path
 from rtml.multi_instance.datasets.classic.parser import (
     ParsedRelationalArff,
@@ -26,11 +30,22 @@ def load_classic_mil_dataset(
     root: str | Path = DEFAULT_CLASSIC_MIL_DATA_DIR,
 ) -> tuple[MultiInstanceDataset, MultiInstanceTask]:
     """Load one classic WEKA MIL dataset from the local cache."""
-    return parse_classic_mil_arff(classic_mil_arff_path(dataset_name, root))
+    parsed = parse_weka_relational_arff(classic_mil_arff_path(dataset_name, root))
+    return _build_dataset(
+        parsed,
+        source_identity={
+            "source": "classic_mil",
+            "release": CLASSIC_MIL_RELEASE,
+            "archive_sha256": CLASSIC_MIL_ARCHIVE_SHA256,
+            "dataset": parsed.relation,
+        },
+    )
 
 
 def _build_dataset(
     parsed: ParsedRelationalArff,
+    *,
+    source_identity: dict[str, object] | None = None,
 ) -> tuple[MultiInstanceDataset, MultiInstanceTask]:
     bag_schema = _build_bag_schema(
         parsed.bag_table,
@@ -42,6 +57,14 @@ def _build_dataset(
         parsed.instance_table,
         instance_attributes=parsed.instance_attributes,
     )
+    metadata = {
+        "source": "classic_mil",
+        "paradigm": "multi_instance",
+        "relation": parsed.relation,
+    }
+    if source_identity is not None:
+        metadata["source_identity"] = source_identity
+
     dataset = MultiInstanceDataset(
         name=parsed.relation,
         bag_table=parsed.bag_table,
@@ -50,18 +73,14 @@ def _build_dataset(
         instance_schema=instance_schema,
         bag_offsets=parsed.bag_offsets,
         bag_id_column=parsed.bag_id_column,
-        metadata={
-            "source": "classic_mil",
-            "paradigm": "multi_instance",
-            "relation": parsed.relation,
-        },
+        metadata=metadata,
     )
     task = MultiInstanceTask(
         name=parsed.relation,
         task_type=TaskType.BINARY_CLASSIFICATION,
         instance_source=dataset.select_instance_features(kinds=[FeatureKind.NUMERIC]),
         target=parsed.target_column,
-        metrics=[MetricSpec("accuracy")],
+        metrics=[MetricSpec(name="accuracy", greater_is_better=True)],
         primary_metric="accuracy",
         metadata={
             "source": "classic_mil",
