@@ -1,8 +1,8 @@
 study:
-  name: classic-mil-attention
+  name: classic-mil-comparison
   kind: comparison
   metadata:
-    intent: compare plain and gated attention pooling
+    intent: compare fixed, prediction, and learned bag aggregation
 
 benchmark:
   source: classic_mil
@@ -12,6 +12,45 @@ benchmark:
   seed: 0
 
 methods:
+  - name: BagFeatureAggregation
+    transform:
+      aggregation:
+        policy: summary_default
+      policy: linear_default
+    model:
+      kind: logistic_regression
+      backend: sklearn
+    metadata:
+      factor.family: bag_feature_aggregation
+      factor.estimator: LogisticRegression
+
+  - name: InstancePoolingClassifier
+    transform:
+      policy: linear_default
+    model:
+      kind: instance_pooling_classifier
+      backend: sklearn
+      params:
+        pooling: max
+    metadata:
+      factor.family: instance_pooling_classifier
+      factor.estimator: LogisticRegression
+      factor.pooling: max
+
+  - name: MI-SVM
+    transform:
+      policy: linear_default
+    model:
+      kind: binary_mi_svm
+      backend: sklearn
+      params:
+        kernel: rbf
+        C: 1.0
+        max_iterations: 50
+    metadata:
+      factor.family: mi_svm
+      factor.kernel: rbf
+
   - name: AttentionDeepMIL
     transform:
       policy: neural_default

@@ -2,7 +2,7 @@ study:
   name: pop-stats
   kind: comparison
   metadata:
-    intent: evaluate permutation-invariant set regression
+    intent: compare fixed and learned permutation-invariant regression
 
 benchmark:
   source: popstats
@@ -12,6 +12,18 @@ benchmark:
   n_folds: 2
 
 methods:
+  - name: BagFeatureAggregation
+    transform:
+      aggregation:
+        policy: summary_default
+      policy: linear_default
+    model:
+      kind: ridge
+      backend: sklearn
+    metadata:
+      factor.family: bag_feature_aggregation
+      factor.estimator: Ridge
+
   - name: DeepSets
     transform:
       policy: neural_default
