@@ -4,8 +4,8 @@ from typing import Any
 import hydra
 from omegaconf import DictConfig, OmegaConf
 
-from rtml.core.runs import RunResult
 from experiments.multi_instance import common
+from rtml.core.runs import RunResult
 
 
 def run_config(config: Mapping[str, Any]) -> list[RunResult]:

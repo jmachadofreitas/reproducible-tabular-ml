@@ -200,9 +200,7 @@ def _mark_worst_primary_metric_subgroups(rows: list[Row]) -> None:
         groups.setdefault(key, []).append(row)
 
     for (_, _, metric_name), group_rows in groups.items():
-        greater_is_better = boolean_value(
-            group_rows[0].get("primary_metric_greater_is_better")
-        )
+        greater_is_better = boolean_value(group_rows[0].get("primary_metric_greater_is_better"))
         if greater_is_better is None:
             continue
         worst = sorted(
@@ -211,4 +209,3 @@ def _mark_worst_primary_metric_subgroups(rows: list[Row]) -> None:
             reverse=not greater_is_better,
         )[0]
         worst["primary_metric_worst_subgroup"] = True
-

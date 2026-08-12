@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from collections.abc import Mapping
 
 # from pathlib import Path
@@ -10,7 +8,6 @@ import hydra
 from omegaconf import DictConfig, OmegaConf
 
 # sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-
 from experiments.single_instance import common
 from rtml.core.runs import RunResult
 

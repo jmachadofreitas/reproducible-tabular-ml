@@ -7,9 +7,9 @@ import pytest
 import rtml.single_instance.datasets.openml_loaders as openml_loaders
 from rtml.core.benchmarks import BenchmarkSuite
 from rtml.core.datasets import FeatureKind
-from rtml.single_instance.datasets.openml_loaders import DEFAULT_OPENML_SPLIT
 from rtml.core.resampling import ResamplingStrategy
 from rtml.core.tasks import TaskType
+from rtml.single_instance.datasets.openml_loaders import DEFAULT_OPENML_SPLIT
 
 
 class FakeOpenMLDataset:
