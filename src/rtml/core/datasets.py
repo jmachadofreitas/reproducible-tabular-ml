@@ -1,12 +1,10 @@
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Literal, overload
 
 import numpy as np
 import pandas as pd
-
-from rtml.core.fingerprints import fingerprint_frame
 
 
 class FeatureKind(str, Enum):
@@ -33,6 +31,15 @@ class FeatureTag(str, Enum):
 
 
 FeatureTagLike = FeatureTag | str
+
+
+def dataset_source(metadata: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Return the source information recorded by a dataset loader."""
+    source = metadata.get("source")
+    details = dict(metadata.get("source_identity") or {})
+    if source is None:
+        return details or None
+    return {**details, "name": source}
 
 
 def _normalize_tag(tag: FeatureTagLike) -> FeatureTagLike:
@@ -283,43 +290,18 @@ class Dataset:
             for column in selected_columns
         }
 
-    def fingerprint_payload(self) -> dict[str, Any]:
-        """Return the dataset structure and provenance used for its fingerprint."""
-        source_identity = self.metadata.get("source_identity")
-        payload = {
-            "name": self.name,
-            "shape": tuple(self.data.shape),
-            "columns": [str(column) for column in self.data.columns],
-            "schema": self.schema,
-            "row_id": self.row_id,
-        }
-        if source_identity is not None:
-            payload["source_identity"] = source_identity
-        else:
-            payload["content"] = fingerprint_frame(self.data)
-            payload["metadata"] = {
-                key: value for key, value in self.metadata.items() if key != "fingerprint"
-            }
-        return payload
-
     def select_rows(self, rows: Sequence[int] | np.ndarray | slice) -> Dataset:
         if isinstance(rows, slice):
             positions = list(range(len(self)))[rows]
         else:
             positions = [int(position) for position in rows]
         selected = self.data.iloc[positions]
-        metadata = dict(self.metadata)
-        if "source_identity" in metadata:
-            metadata["source_identity"] = {
-                "parent": metadata["source_identity"],
-                "row_positions": positions,
-            }
         return Dataset(
             name=self.name,
             data=selected,
             schema=self.schema,
             row_id=self.row_id,
-            metadata=metadata,
+            metadata=self.metadata,
         )
 
     @overload

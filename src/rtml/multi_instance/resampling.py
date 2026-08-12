@@ -26,6 +26,7 @@ def build_multi_instance_resampling_plan(
     resampling keeps groups isolated across training, validation, and test.
     """
     task.validate_columns(dataset)
+    _validate_group_columns(task.groups, spec.groups)
     bag_indices = np.arange(dataset.n_bags)
     resamples: list[Resample] = []
 
@@ -138,6 +139,12 @@ def build_multi_instance_resampling_plan(
         resamples=resamples,
         metadata={"paradigm": "multi_instance"},
     )
+
+
+def _validate_group_columns(declared: list[str], selected: list[str]) -> None:
+    undeclared = [column for column in selected if column not in declared]
+    if undeclared:
+        raise ValueError(f"resampling groups are not declared by the task: {undeclared}")
 
 
 def _bag_column(

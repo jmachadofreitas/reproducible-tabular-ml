@@ -34,7 +34,6 @@ def load_classic_mil_dataset(
     return _build_dataset(
         parsed,
         source_identity={
-            "source": "classic_mil",
             "release": CLASSIC_MIL_RELEASE,
             "archive_sha256": CLASSIC_MIL_ARCHIVE_SHA256,
             "dataset": parsed.relation,

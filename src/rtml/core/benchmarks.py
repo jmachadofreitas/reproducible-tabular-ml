@@ -24,6 +24,10 @@ class BenchmarkCase(Generic[DatasetT, TaskT]):
     def __post_init__(self) -> None:
         if not self.name:
             raise ValueError("benchmark task name must be non-empty")
+        if self.resampling.dataset_name != self.dataset.name:
+            raise ValueError("resampling plan dataset name must match the benchmark dataset")
+        if self.resampling.task_name != self.task.name:
+            raise ValueError("resampling plan task name must match the benchmark task")
         self.metadata = dict(self.metadata or {})
 
 

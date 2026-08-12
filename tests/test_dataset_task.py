@@ -398,7 +398,7 @@ def test_load_sklearn_regression_suite_builds_default_suite() -> None:
     assert all(case.task.primary_metric == "rmse" for case in suite.cases)
     assert all(case.resampling.spec.strategy == ResamplingStrategy.KFOLD for case in suite.cases)
     assert all(len(case.resampling.resamples) == 5 for case in suite.cases)
-    assert {case.dataset.metadata.get("generator") for case in suite.cases[1:]} == {
+    assert {case.dataset.metadata["source_identity"]["generator"] for case in suite.cases[1:]} == {
         "make_regression",
         "make_friedman1",
         "make_friedman2",

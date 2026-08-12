@@ -7,6 +7,7 @@ from ignite.engine import Engine, Events, State
 from ignite.handlers import EarlyStopping
 from torch.utils.data import DataLoader
 
+from rtml.core.runtime import RuntimeSpec
 from rtml.loggers import Logger
 from rtml.methods.engines.checkpointing import CheckpointManager
 from rtml.methods.engines.metrics import RunningMetrics
@@ -16,6 +17,24 @@ BatchPreparer = Callable[[Batch, torch.device | str | None], Batch]
 StepOutput = Mapping[str, Any] | torch.Tensor | float | int | None
 TrainingStep = Callable[[Batch], StepOutput]
 EvaluationStep = Callable[[Batch], Mapping[str, Any] | None]
+
+
+def seed_torch(seed: int, *, deterministic: bool | None = None) -> torch.Generator:
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+    if deterministic is not None:
+        torch.use_deterministic_algorithms(deterministic, warn_only=True)
+    generator = torch.Generator()
+    generator.manual_seed(seed)
+    return generator
+
+
+def resolve_device(runtime: RuntimeSpec | None) -> torch.device:
+    if runtime is not None and runtime.device:
+        return torch.device(runtime.device)
+    return torch.device("cpu")
 
 
 def send_to_device(value: Any, device: torch.device | str | None) -> Any:

@@ -86,6 +86,15 @@ def test_load_openml_benchmark_case_builds_dataset_task_and_resampling(monkeypat
     assert benchmark_case.metadata["split_dimensions"] == (1, 2, 1)
 
 
+def test_load_openml_benchmark_case_rejects_unknown_evaluation_measure(monkeypatch) -> None:
+    fake_task = make_fake_task(1590)
+    fake_task.evaluation_measure = "unsupported_measure"
+    monkeypatch.setattr(openml_loaders.openml.tasks, "get_task", lambda *args, **kwargs: fake_task)
+
+    with pytest.raises(ValueError, match="unsupported OpenML evaluation measure"):
+        openml_loaders.load_openml_benchmark_case(1590)
+
+
 def test_load_openml_suite_returns_benchmark_suite(monkeypatch) -> None:
     fake_suite = SimpleNamespace(name="OpenML-CC18", description="benchmark", tasks=[1590, 31])
     monkeypatch.setattr(openml_loaders.openml.study, "get_suite", lambda suite_id: fake_suite)

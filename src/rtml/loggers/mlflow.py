@@ -1,4 +1,3 @@
-import json
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict
 from pathlib import Path
@@ -99,7 +98,9 @@ class MLflowWriter:
         params.update(self._flatten_mapping("transform", record.method.transform))
         params.update(self._flatten_mapping("model", asdict(record.method.model)))
         params.update(self._flatten_mapping("fit", record.method.fit))
-        params.update(self._flatten_mapping("runtime", asdict(record.runtime)))
+        if record.runtime is not None:
+            params.update(self._flatten_mapping("runtime", asdict(record.runtime)))
+        params.update(self._flatten_mapping("environment", record.environment))
         params.update(self._flatten_mapping("metadata", record.metadata))
         self._mlflow.log_params(params)
 
@@ -109,7 +110,6 @@ class MLflowWriter:
             "rtml.dataset": record.dataset_name,
             "rtml.task": record.task_name,
             "rtml.method": record.method.name,
-            "rtml.fingerprints": json.dumps(record.fingerprints, sort_keys=True),
         }
         if "paradigm" in record.metadata:
             tags["rtml.paradigm"] = str(record.metadata["paradigm"])
@@ -134,6 +134,10 @@ class MLflowWriter:
         paths: list[str | Path] = list(artifact_paths)
         if record.prediction_path is not None:
             paths.append(record.prediction_path)
+        if record.run_path is not None:
+            paths.append(record.run_path)
+        if record.case_path is not None:
+            paths.append(record.case_path)
         for path in paths:
             artifact_path = Path(path)
             if artifact_path.is_file():

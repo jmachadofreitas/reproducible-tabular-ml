@@ -7,7 +7,6 @@ import numpy.typing as npt
 import pandas as pd
 
 from rtml.core.datasets import FeatureInfo, FeatureKind, FeatureSchema, FeatureTagLike
-from rtml.core.fingerprints import fingerprint_frame
 
 IndexArray: TypeAlias = npt.NDArray[np.integer[Any]]
 
@@ -126,35 +125,6 @@ class MultiInstanceDataset:
             column: data[column].astype("string").fillna("<NA>").to_numpy(dtype=str)
             for column in selected_columns
         }
-
-    def fingerprint_payload(self) -> dict[str, Any]:
-        """Return the dataset structure and provenance used for its fingerprint."""
-        source_identity = self.metadata.get("source_identity")
-        payload = {
-            "name": self.name,
-            "bag_table": {
-                "shape": tuple(self.bag_table.shape),
-                "columns": [str(column) for column in self.bag_table.columns],
-                "schema": self.bag_schema,
-                "id_column": self.bag_id_column,
-            },
-            "instance_table": {
-                "shape": tuple(self.instance_table.shape),
-                "columns": [str(column) for column in self.instance_table.columns],
-                "schema": self.instance_schema,
-                "id_column": self.instance_id_column,
-            },
-            "bag_offsets": self.bag_offsets,
-        }
-        if source_identity is not None:
-            payload["source_identity"] = source_identity
-        else:
-            payload["bag_content"] = fingerprint_frame(self.bag_table)
-            payload["instance_content"] = fingerprint_frame(self.instance_table)
-            payload["metadata"] = {
-                key: value for key, value in self.metadata.items() if key != "fingerprint"
-            }
-        return payload
 
     def require_bag_columns(self, columns: Iterable[str]) -> None:
         missing = [column for column in columns if column not in self._bag_columns]

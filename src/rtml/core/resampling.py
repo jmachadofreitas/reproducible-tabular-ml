@@ -1,5 +1,3 @@
-import hashlib
-import json
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -15,7 +13,6 @@ class ResamplingStrategy(str, Enum):
     KFOLD = "kfold"
     STRATIFIED_KFOLD = "stratified_kfold"
     GROUP_KFOLD = "group_kfold"
-    TIME_SERIES_SPLIT = "time_series_split"
     BOOTSTRAP = "bootstrap"
     # OpenML exposes the saved split indices, but the strategy may not be there.
     UNKNOWN_OPENML_TASK = "unknown_openml_task"
@@ -50,7 +47,6 @@ class ResamplingSpec:
     seed: int | None = None
     stratify: str | None = None
     groups: list[str] = field(default_factory=list)
-    timestamp: str | None = None
     replacement: bool = True
     metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -116,9 +112,6 @@ class ResamplingSpec:
         if self.strategy == ResamplingStrategy.GROUP_KFOLD and not self.groups:
             raise ValueError("group_kfold requires groups")
 
-        if self.strategy == ResamplingStrategy.TIME_SERIES_SPLIT and self.timestamp is None:
-            raise ValueError("time_series_split requires timestamp")
-
 
 @dataclass
 class ResamplingPlan:
@@ -126,7 +119,6 @@ class ResamplingPlan:
     task_name: str
     spec: ResamplingSpec
     resamples: list[Resample]
-    fingerprint: str = field(init=False)
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -136,29 +128,6 @@ class ResamplingPlan:
         resample_ids = [resample.id for resample in self.resamples]
         if len(resample_ids) != len(set(resample_ids)):
             raise ValueError(f"resample ids must be unique: {resample_ids}")
-
-        self.fingerprint = self._compute_fingerprint()
-
-    # The fingerprint identifies the materialized splits, not the configuration
-    # that happened to produce them.
-    def _compute_fingerprint(self) -> str:
-        payload = {
-            "dataset_name": self.dataset_name,
-            "task_name": self.task_name,
-            "resamples": [
-                {
-                    "id": resample.id,
-                    "train_idx": resample.train_idx.tolist(),
-                    "valid_idx": None
-                    if resample.valid_idx is None
-                    else resample.valid_idx.tolist(),
-                    "test_idx": resample.test_idx.tolist(),
-                }
-                for resample in self.resamples
-            ],
-        }
-        digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
-        return f"sha256:{digest}"
 
     def get_resample(self, resample_id: str | None = None) -> Resample:
         """Return one materialized resample by id, or the first one by default."""

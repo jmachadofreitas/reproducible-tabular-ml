@@ -47,6 +47,13 @@ class ExecutionPlan:
     runs: tuple[RunSpec, ...]
     metadata: dict[str, Any] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        run_keys = [
+            (run.case.name, run.method.name, run.resample_id, run.seed) for run in self.runs
+        ]
+        if len(run_keys) != len(set(run_keys)):
+            raise ValueError("execution plan run keys must be unique")
+
     @classmethod
     def from_suite(
         cls,
@@ -134,14 +141,16 @@ class RunRecord:
     resample_id: str
     method: MethodSpec
     seed: int
-    fingerprints: dict[str, str]
-    runtime: RuntimeSpec
+    runtime: RuntimeSpec | None
+    environment: dict[str, Any]
     status: Literal["success", "failed"]
     primary_metric_greater_is_better: bool | None = None
     metrics: dict[str, float] = field(default_factory=dict)
     fit_time: float | None = None
     predict_time: float | None = None
     prediction_path: str | None = None
+    run_path: str | None = None
+    case_path: str | None = None
     error: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 

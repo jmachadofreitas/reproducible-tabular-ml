@@ -44,6 +44,8 @@ def run_record_row(record: RunRecord) -> Row:
         "fit_time": record.fit_time,
         "predict_time": record.predict_time,
         "prediction_path": record.prediction_path or "",
+        "run_path": record.run_path or "",
+        "case_path": record.case_path or "",
         "error": record.error or "",
     }
     for name, value in sorted(record.metrics.items()):

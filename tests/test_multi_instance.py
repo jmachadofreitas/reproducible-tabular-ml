@@ -4,7 +4,6 @@ import pytest
 
 from rtml.core.benchmarks import BenchmarkCase, BenchmarkSuite
 from rtml.core.datasets import FeatureInfo, FeatureKind, FeatureSchema
-from rtml.core.fingerprints import fingerprint_dataset
 from rtml.core.resampling import ResamplingSpec, ResamplingStrategy
 from rtml.core.tasks import MetricSpec, TaskType
 from rtml.multi_instance import MultiInstanceDataset, MultiInstanceTask
@@ -101,26 +100,10 @@ def test_multi_instance_dataset_uses_offsets_for_bag_storage() -> None:
     assert dataset.sample_ids_for([2, 0]).tolist() == [30, 10]
 
 
-def test_multi_instance_dataset_supports_evidence_and_bag_subgroups() -> None:
+def test_multi_instance_dataset_supports_bag_subgroups() -> None:
     dataset = make_grouped_mil_dataset()
 
-    assert fingerprint_dataset(dataset).startswith("sha256:")
     assert dataset.subgroup_values(["site"], [1, 4])["site"].tolist() == ["b", "a"]
-
-
-def test_local_multi_instance_fingerprint_covers_tables_and_offsets() -> None:
-    original = make_mil_dataset()
-    changed_bag = make_mil_dataset()
-    changed_instance = make_mil_dataset()
-    changed_offsets = make_mil_dataset()
-    changed_bag.bag_table.loc[0, "target"] = 0.9
-    changed_instance.instance_table.loc[0, "x_00"] = 9.0
-    changed_offsets.bag_offsets = np.array([0, 1, 5, 6])
-
-    original_fingerprint = fingerprint_dataset(original)
-    assert fingerprint_dataset(changed_bag) != original_fingerprint
-    assert fingerprint_dataset(changed_instance) != original_fingerprint
-    assert fingerprint_dataset(changed_offsets) != original_fingerprint
 
 
 def test_multi_instance_dataset_rejects_bad_offsets() -> None:
@@ -291,7 +274,6 @@ def test_multi_instance_group_kfold_keeps_bag_groups_together() -> None:
         assert valid_groups.isdisjoint(test_groups)
 
     repeated = build_multi_instance_resampling_plan(dataset=dataset, task=task, spec=spec)
-    assert repeated.fingerprint == plan.fingerprint
     for expected, actual in zip(plan.resamples, repeated.resamples, strict=True):
         assert np.array_equal(expected.train_idx, actual.train_idx)
         assert np.array_equal(expected.valid_idx, actual.valid_idx)
@@ -310,11 +292,12 @@ def test_popstats_loader_returns_bag_level_regression_task() -> None:
     assert task.task_type == TaskType.REGRESSION
     assert np.allclose(dataset.bag_table["target"], dataset_again.bag_table["target"])
     assert np.allclose(dataset.instance_table, dataset_again.instance_table)
-    assert "source_identity" not in dataset.metadata
-    assert fingerprint_dataset(dataset) == fingerprint_dataset(dataset_again)
-
-    dataset_again.instance_table.loc[0, "x_00"] += 1.0
-    assert fingerprint_dataset(dataset) != fingerprint_dataset(dataset_again)
+    assert dataset.metadata["source_identity"] == {
+        "task_id": 1,
+        "n_bags": 8,
+        "instances_per_bag": 4,
+        "seed": 13,
+    }
 
 
 def test_popstats_targets_match_their_gaussian_statistics() -> None:

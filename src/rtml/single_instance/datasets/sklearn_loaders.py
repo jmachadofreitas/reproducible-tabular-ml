@@ -111,7 +111,6 @@ def load_sklearn_dataset(
     dataset_metadata = {
         "source": "sklearn",
         "source_identity": {
-            "source": "sklearn",
             "loader": loader.__name__,
             "sklearn_version": sklearn_version,
         },
@@ -150,7 +149,6 @@ def _load_all_numeric_dataset(
     dataset_metadata = {
         "source": "sklearn",
         "source_identity": {
-            "source": "sklearn",
             "loader": loader.__name__,
             "sklearn_version": sklearn_version,
         },
@@ -261,12 +259,10 @@ def _make_numeric_regression_dataset(
         metadata={
             "source": "sklearn",
             "source_identity": {
-                "source": "sklearn",
                 "generator": metadata["generator"],
                 "parameters": dict(metadata),
                 "sklearn_version": sklearn_version,
             },
-            **dict(metadata),
         },
     )
     task = _build_task(

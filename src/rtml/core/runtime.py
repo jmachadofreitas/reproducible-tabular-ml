@@ -1,17 +1,18 @@
 import platform as platform_module
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, version
+from typing import Any
 
-DEFAULT_RUNTIME_PACKAGES = (
+DEFAULT_ENVIRONMENT_PACKAGES = (
     "numpy",
     "pandas",
     "scikit-learn",
     "scipy",
     "torch",
-    "xgboost",
-    "catboost",
-    "lightgbm",
+    "pytorch-ignite",
+    "tabm",
+    "openml",
     "ray",
     "mlflow",
     "rtml",
@@ -20,49 +21,31 @@ DEFAULT_RUNTIME_PACKAGES = (
 
 @dataclass(frozen=True)
 class RuntimeSpec:
-    """Backend-facing runtime settings and observed environment context.
+    """Backend-facing hints that may change how a method executes.
 
-    Runtime settings may affect how a method executes, for example device,
-    precision, determinism, or thread count.
-
-    Scheduler reservations live on `RunSpec.scheduler_resources` instead.
+    Scheduler reservations and observed environment information are separate
+    concerns: they live on `RunSpec.scheduler_resources` and the resulting
+    `RunRecord.environment`, respectively.
     """
 
-    python_version: str | None = None
-    package_versions: dict[str, str] = field(default_factory=dict)
-    platform: str | None = None
     device: str | None = None
-    accelerator: str | None = None
-    precision: str | None = None
     deterministic: bool | None = None
     num_threads: int | None = None
-    code_version: str | None = None
 
 
-def capture_runtime(
+def capture_environment(
     *,
-    packages: tuple[str, ...] = DEFAULT_RUNTIME_PACKAGES,
-    code_version: str | None = None,
-    hints: RuntimeSpec | None = None,
-) -> RuntimeSpec:
-    """Capture environment evidence and retain backend-facing runtime hints."""
-    recorded_code_version = code_version
-    if recorded_code_version is None and hints is not None:
-        recorded_code_version = hints.code_version
+    packages: tuple[str, ...] = DEFAULT_ENVIRONMENT_PACKAGES,
+) -> dict[str, Any]:
+    """Capture observed software and platform information for a result."""
     package_versions: dict[str, str] = {}
     for package in packages:
         try:
             package_versions[package] = version(package)
         except PackageNotFoundError:
             continue
-    return RuntimeSpec(
-        python_version=sys.version.split()[0],
-        package_versions=package_versions,
-        platform=platform_module.platform(),
-        device=None if hints is None else hints.device,
-        accelerator=None if hints is None else hints.accelerator,
-        precision=None if hints is None else hints.precision,
-        deterministic=None if hints is None else hints.deterministic,
-        num_threads=None if hints is None else hints.num_threads,
-        code_version=recorded_code_version,
-    )
+    return {
+        "python_version": sys.version.split()[0],
+        "platform": platform_module.platform(),
+        "packages": package_versions,
+    }

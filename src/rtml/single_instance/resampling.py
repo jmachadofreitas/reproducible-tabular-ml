@@ -22,6 +22,7 @@ def build_single_instance_resampling_plan(
 ) -> ResamplingPlan:
     """Materialize row-position splits and optional saved validation rows."""
     task.validate_columns(dataset)
+    _validate_group_columns(task.groups, spec.groups)
     row_indices = np.arange(len(dataset))
     resamples: list[Resample] = []
 
@@ -95,6 +96,12 @@ def build_single_instance_resampling_plan(
         resamples=resamples,
         metadata={"paradigm": "single_instance"},
     )
+
+
+def _validate_group_columns(declared: list[str], selected: list[str]) -> None:
+    undeclared = [column for column in selected if column not in declared]
+    if undeclared:
+        raise ValueError(f"resampling groups are not declared by the task: {undeclared}")
 
 
 def _column_values(dataset: Dataset, column: str | None, *, role: str) -> np.ndarray:

@@ -1,19 +1,20 @@
+from dataclasses import replace
+
 import pytest
 
-from rtml.core.benchmarks import BenchmarkSuite
+from rtml.core.benchmarks import BenchmarkCase, BenchmarkSuite
+from rtml.core.methods import MethodSpec, ModelSpec
+from rtml.core.resampling import ResamplingSpec, ResamplingStrategy
+from rtml.core.studies import Study, StudyKind
 from rtml.single_instance.datasets.sklearn_loaders import (
     build_sklearn_benchmark_case,
-    build_sklearn_resampling_spec,
     load_breast_cancer_dataset,
 )
-from rtml.core.methods import MethodSpec, ModelSpec
-from rtml.core.resampling import ResamplingStrategy
-from rtml.core.studies import Study, StudyKind
 
 
 def make_suite() -> BenchmarkSuite:
     dataset, task = load_breast_cancer_dataset()
-    spec = build_sklearn_resampling_spec(
+    spec = ResamplingSpec(
         name="breast_cancer_holdout",
         strategy=ResamplingStrategy.STRATIFIED_HOLDOUT,
         test_size=0.25,
@@ -109,4 +110,30 @@ def test_study_rejects_duplicate_method_names() -> None:
             name="duplicate_methods",
             suite=make_suite(),
             methods=[make_method("same"), make_method("same")],
+        )
+
+
+def test_benchmark_suite_requires_at_least_one_case() -> None:
+    with pytest.raises(ValueError, match="at least one case"):
+        BenchmarkSuite(name="empty", cases=[])
+
+
+def test_benchmark_suite_rejects_duplicate_case_names() -> None:
+    case = make_suite().cases[0]
+
+    with pytest.raises(ValueError, match="case names must be unique"):
+        BenchmarkSuite(name="duplicates", cases=[case, case])
+
+
+@pytest.mark.parametrize("field", ["dataset_name", "task_name"])
+def test_benchmark_case_requires_matching_resampling_names(field) -> None:
+    case = make_suite().cases[0]
+    resampling = replace(case.resampling, **{field: "different"})
+
+    with pytest.raises(ValueError, match=f"{field.removesuffix('_name')} name must match"):
+        BenchmarkCase(
+            name=case.name,
+            dataset=case.dataset,
+            task=case.task,
+            resampling=resampling,
         )

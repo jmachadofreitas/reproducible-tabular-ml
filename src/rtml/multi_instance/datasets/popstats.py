@@ -213,12 +213,13 @@ def load_popstats_dataset(
         bag_id_column=BAG_ID_COLUMN,
         metadata={
             "source": "popstats",
+            "source_identity": {
+                "task_id": task_id,
+                "n_bags": n_bags,
+                "instances_per_bag": instances_per_bag,
+                "seed": seed,
+            },
             "paradigm": "multi_instance",
-            "task_id": task_id,
-            "task": POPSTATS_TASKS[task_id],
-            "n_bags": n_bags,
-            "instances_per_bag": instances_per_bag,
-            "seed": seed,
         },
     )
     task = MultiInstanceTask(

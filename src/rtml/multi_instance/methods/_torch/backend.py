@@ -22,9 +22,8 @@ from rtml.methods.engines.checkpointing import (
     checkpoint_directory,
 )
 from rtml.methods.engines.config import TorchFitConfig
-from rtml.methods.engines.core import Evaluator, Trainer
+from rtml.methods.engines.core import Evaluator, Trainer, resolve_device, seed_torch
 from rtml.methods.engines.fitting import fit_model_bundle
-from rtml.methods.engines.runtime import resolve_device, seed_torch
 from rtml.methods.engines.task_adapters import (
     infer_score_mode,
     resolve_score_metric,

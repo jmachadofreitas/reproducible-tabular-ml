@@ -2,7 +2,6 @@ import pytest
 
 from rtml.core.resampling import (
     Resample,
-    ResamplingPlan,
     ResamplingSpec,
     ResamplingStrategy,
 )
@@ -19,58 +18,6 @@ def test_resample_normalizes_indices_and_metadata() -> None:
     assert resample.train_idx.tolist() == [0, 2, 4]
     assert resample.test_idx.tolist() == [1, 3]
     assert resample.metadata == {"fold": 0}
-
-
-def test_resampling_fingerprint_ignores_unused_spec_fields() -> None:
-    resample = Resample(id="split_00", train_idx=[0, 2], test_idx=[1, 3])
-    first = ResamplingPlan(
-        dataset_name="dataset",
-        task_name="task",
-        spec=ResamplingSpec(
-            name="first",
-            strategy=ResamplingStrategy.HOLDOUT,
-            test_size=0.5,
-            n_folds=2,
-            n_samples=3,
-        ),
-        resamples=[resample],
-    )
-    second = ResamplingPlan(
-        dataset_name="dataset",
-        task_name="task",
-        spec=ResamplingSpec(
-            name="second",
-            strategy=ResamplingStrategy.HOLDOUT,
-            test_size=0.5,
-            n_folds=9,
-            n_samples=7,
-        ),
-        resamples=[resample],
-    )
-
-    assert first.fingerprint == second.fingerprint
-
-
-def test_resampling_fingerprint_changes_with_materialized_indices() -> None:
-    spec = ResamplingSpec(
-        name="holdout",
-        strategy=ResamplingStrategy.HOLDOUT,
-        test_size=0.5,
-    )
-    first = ResamplingPlan(
-        dataset_name="dataset",
-        task_name="task",
-        spec=spec,
-        resamples=[Resample(id="split_00", train_idx=[0, 2], test_idx=[1, 3])],
-    )
-    second = ResamplingPlan(
-        dataset_name="dataset",
-        task_name="task",
-        spec=spec,
-        resamples=[Resample(id="split_00", train_idx=[0, 3], test_idx=[1, 2])],
-    )
-
-    assert first.fingerprint != second.fingerprint
 
 
 def test_kfold_resampling_spec_requires_multiple_folds() -> None:

@@ -70,7 +70,7 @@ def run_config(config: Mapping[str, Any], *, experiment_name: str) -> list[RunRe
         executor=build_executor(execution, logger_config=logger_config),
         runtime_specs=build_runtime_specs(config.get("runtime_specs", {})),
         scheduler_resources=build_scheduler_resources(config.get("scheduler_resources", {})),
-        prediction_dir=execution.get("prediction_dir"),
+        artifact_dir=execution.get("artifact_dir"),
         logger=logger,
         metadata={"experiment": experiment_name, "paradigm": PARADIGM},
         continue_on_error=bool(execution.get("continue_on_error", False)),

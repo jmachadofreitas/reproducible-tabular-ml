@@ -9,16 +9,12 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
-from rtml.core.fingerprints import (
-    fingerprint_dataset,
-    fingerprint_method,
-    fingerprint_task,
-    stable_fingerprint,
-    stable_jsonable,
-)
+from rtml.core.datasets import dataset_source
 from rtml.core.methods import MethodSpec
-from rtml.core.runtime import RuntimeSpec, capture_runtime
+from rtml.core.runtime import RuntimeSpec, capture_environment
+from rtml.core.serialization import json_text
 from rtml.loggers import Logger
 from rtml.methods.backends.base import BackendRefitResult, RefitBackend
 
@@ -29,11 +25,12 @@ class RefitRecord:
 
     refit_id: str
     dataset_name: str
+    dataset_source: dict[str, Any]
     task: Any
     method: MethodSpec
     seed: int
-    fingerprints: dict[str, str]
-    runtime: RuntimeSpec
+    runtime: RuntimeSpec | None
+    environment: dict[str, Any]
     training_size: int
     input_schema: dict[str, Any]
     fit_time: float
@@ -49,39 +46,28 @@ def refit_method(
     task: Any,
     method: MethodSpec,
     backend: RefitBackend,
-    output_dir: str | Path,
+    artifact_root: str | Path,
     seed: int = 0,
     runtime: RuntimeSpec | None = None,
     logger: Logger | None = None,
 ) -> tuple[Any, RefitRecord]:
-    """Fit a complete method and persist its backend-native artifacts."""
+    """Fit a complete method into a unique directory under ``artifact_root``."""
     _require_backend(method, backend)
 
-    observed_runtime = capture_runtime(hints=runtime)
-    fingerprints = {
-        "dataset": fingerprint_dataset(dataset),
-        "task": fingerprint_task(task),
-        "method": fingerprint_method(method),
-    }
-    refit_digest = stable_fingerprint(
-        {
-            "fingerprints": fingerprints,
-            "seed": seed,
-        }
-    ).removeprefix("sha256:")[:16]
-    refit_id = f"{dataset.name}:{method.name}:sha256:{refit_digest}"
+    created_at = datetime.now(timezone.utc)
+    instance_id = f"{created_at:%Y%m%dT%H%M%S%fZ}-{uuid4().hex[:12]}"
+    refit_id = f"{dataset.name}:{task.name}:{method.name}:seed-{seed}:{instance_id}"
+    source = dataset_source(dataset.metadata)
 
-    root = Path(output_dir)
-    artifact_dir = root / refit_digest
-    if artifact_dir.exists():
-        raise FileExistsError(f"refit artifact already exists: {artifact_dir}")
+    root = Path(artifact_root)
+    artifact_dir = root / instance_id
     root.mkdir(parents=True, exist_ok=True)
-    temporary_dir = Path(tempfile.mkdtemp(prefix=f".{refit_digest}-", dir=root))
+    temporary_dir = Path(tempfile.mkdtemp(prefix=f".{instance_id}-", dir=root))
 
     run_context = (
         nullcontext()
         if logger is None
-        else logger.start_run(run_name=f"refit/{dataset.name}/{method.name}")
+        else logger.start_run(run_name=f"refit/{dataset.name}/{task.name}/{method.name}")
     )
     try:
         with run_context:
@@ -98,17 +84,18 @@ def refit_method(
             record = RefitRecord(
                 refit_id=refit_id,
                 dataset_name=dataset.name,
+                dataset_source=source or {},
                 task=task,
                 method=method,
                 seed=seed,
-                fingerprints=fingerprints,
-                runtime=observed_runtime,
+                runtime=runtime,
+                environment=capture_environment(),
                 training_size=backend_result.training_size,
                 input_schema=backend_result.input_schema,
                 fit_time=backend_result.fit_time,
                 artifact_dir=str(artifact_dir),
                 artifacts=artifacts,
-                created_at=datetime.now(timezone.utc).isoformat(),
+                created_at=created_at.isoformat(),
                 metadata={
                     "backend": backend.name,
                     **backend_result.metadata,
@@ -118,7 +105,7 @@ def refit_method(
             manifest = asdict(record)
             manifest.pop("artifact_dir")
             manifest_path.write_text(
-                json.dumps(stable_jsonable(manifest), indent=2, sort_keys=True) + "\n",
+                json_text(manifest),
                 encoding="utf-8",
             )
             if logger is not None:

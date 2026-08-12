@@ -84,11 +84,8 @@ def build_runtime_specs(config: Mapping[str, Any] | None) -> dict[str, RuntimeSp
         method = {**defaults, **dict(values or {})}
         runtimes[str(name)] = RuntimeSpec(
             device=method.get("device"),
-            accelerator=method.get("accelerator"),
-            precision=method.get("precision"),
             deterministic=method.get("deterministic"),
             num_threads=method.get("num_threads"),
-            code_version=method.get("code_version"),
         )
     return runtimes
 
