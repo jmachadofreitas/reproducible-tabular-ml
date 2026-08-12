@@ -55,7 +55,7 @@ seeds:
   - 0
 
 execution:
-  executor: ray
+  executor: sequential
   show_progress: true
   prediction_dir: ${hydra:runtime.output_dir}/predictions
   summary_csv: ${hydra:runtime.output_dir}/summary.csv
