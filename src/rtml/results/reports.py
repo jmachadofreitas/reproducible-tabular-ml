@@ -5,6 +5,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeAlias
 
+from rtml.core.serialization import JSONEncoder
 from rtml.results._values import boolean_value, finite_number
 
 if TYPE_CHECKING:
@@ -202,7 +203,7 @@ def _write_csv(rows: list[Row], path: Path) -> None:
 
 def _write_json(rows: list[Row], path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(rows, indent=2), encoding="utf-8")
+    path.write_text(json.dumps(rows, cls=JSONEncoder, indent=2) + "\n", encoding="utf-8")
 
 
 def _write_markdown(rows: list[Row], path: Path) -> None:

@@ -11,7 +11,7 @@ from rtml.core.benchmarks import BenchmarkCase
 from rtml.core.datasets import Dataset, dataset_source
 from rtml.core.results import PredictionSet
 from rtml.core.runs import ExecutionPlan, RunResult, RunSpec
-from rtml.core.serialization import json_text
+from rtml.core.serialization import JSONEncoder
 from rtml.multi_instance.datasets.base import MultiInstanceDataset
 from rtml.results.artifacts import save_prediction_set
 
@@ -25,13 +25,13 @@ def prepare_execution_artifacts(
         return
 
     root = Path(artifact_dir)
-    json_text(plan.metadata)
+    json.dumps(plan.metadata, cls=JSONEncoder)
     cases: dict[str, BenchmarkCase] = {}
     for run_spec in plan.runs:
         case = cases.setdefault(run_spec.case.name, run_spec.case)
-        if case is not run_spec.case and json_text(_case_payload(case)) != json_text(
-            _case_payload(run_spec.case)
-        ):
+        if case is not run_spec.case and json.dumps(
+            _case_payload(case), cls=JSONEncoder, sort_keys=True
+        ) != json.dumps(_case_payload(run_spec.case), cls=JSONEncoder, sort_keys=True):
             raise ValueError(f"execution plan contains conflicting cases named {case.name!r}")
 
     case_artifacts = [_case_artifact(root, case) for case in cases.values()]
@@ -95,10 +95,14 @@ def save_run_artifacts(
     result = replace(result, predictions=predictions)
 
     # Serialize first so unsupported metadata cannot leave partial artifacts.
-    run_text = json_text(_run_payload(result, run_dir=run_dir, case_path=case_path))
-    run_dir.parent.mkdir(parents=True, exist_ok=True)
-    temporary_dir = Path(
-        tempfile.mkdtemp(prefix=f".{run_dir.name}.", dir=run_dir.parent)
+    run_text = (
+        json.dumps(
+            _run_payload(result, run_dir=run_dir, case_path=case_path),
+            cls=JSONEncoder,
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
     )
     try:
         if predictions is not None and prediction_path is not None:
@@ -113,11 +117,12 @@ def save_run_artifacts(
 
 def _prepare_run_destination(run_spec: RunSpec, root: Path) -> None:
     # This also validates that planned method/runtime metadata is JSON evidence.
-    json_text(
+    json.dumps(
         {
             "method": asdict(run_spec.method),
             "runtime": run_spec.runtime,
-        }
+        },
+        cls=JSONEncoder,
     )
     run_dir = _run_directory(
         root,
@@ -227,7 +232,8 @@ def _case_path(root: Path, case_name: str) -> Path:
 
 
 def _case_artifact(root: Path, case: BenchmarkCase) -> tuple[Path, str]:
-    return _case_path(root, case.name), json_text(_case_payload(case))
+    text = json.dumps(_case_payload(case), cls=JSONEncoder, indent=2, sort_keys=True) + "\n"
+    return _case_path(root, case.name), text
 
 
 def _check_case_artifact(path: Path, text: str) -> None:

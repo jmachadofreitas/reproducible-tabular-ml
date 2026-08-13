@@ -14,12 +14,12 @@ from uuid import uuid4
 from rtml.core.datasets import dataset_source
 from rtml.core.methods import MethodSpec
 from rtml.core.runtime import RuntimeSpec, capture_environment
-from rtml.core.serialization import json_text
+from rtml.core.serialization import JSONEncoder
 from rtml.loggers import Logger
 from rtml.methods.backends.base import BackendRefitResult, RefitBackend
 
 
-@dataclass(frozen=True)
+@dataclass
 class RefitRecord:
     """Observed lineage and artifact details for one final method fit."""
 
@@ -105,7 +105,7 @@ def refit_method(
             manifest = asdict(record)
             manifest.pop("artifact_dir")
             manifest_path.write_text(
-                json_text(manifest),
+                json.dumps(manifest, cls=JSONEncoder, indent=2, sort_keys=True) + "\n",
                 encoding="utf-8",
             )
             if logger is not None:
