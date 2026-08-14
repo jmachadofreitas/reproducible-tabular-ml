@@ -3,6 +3,13 @@ from enum import Enum
 from typing import Any
 
 import numpy as np
+from sklearn.model_selection import (
+    GroupKFold,
+    GroupShuffleSplit,
+    KFold,
+    StratifiedKFold,
+    train_test_split,
+)
 
 
 class ResamplingStrategy(str, Enum):
@@ -161,6 +168,187 @@ class ResamplingPlan:
             if resample.id == resample_id:
                 return resample
         raise ValueError(f"unknown resample id {resample_id!r}")
+
+
+def materialize_resamples(
+    *,
+    n_items: int,
+    spec: ResamplingSpec,
+    unit: str,
+    metadata: dict[str, Any],
+    stratify_values: np.ndarray | None = None,
+    group_values: np.ndarray | None = None,
+) -> list[Resample]:
+    """Materialize positional splits after a paradigm resolves auxiliary columns."""
+    positions = np.arange(n_items)
+    resamples: list[Resample] = []
+
+    if spec.strategy == ResamplingStrategy.HOLDOUT:
+        train_idx, test_idx = train_test_split(
+            positions,
+            test_size=spec.test_size,
+            shuffle=spec.shuffle,
+            random_state=spec.seed if spec.shuffle else None,
+        )
+        resamples.append(_resample("repeat_00", train_idx, test_idx, metadata=metadata))
+    elif spec.strategy == ResamplingStrategy.STRATIFIED_HOLDOUT:
+        if stratify_values is None:
+            raise ValueError("stratified resampling requires stratify values")
+        train_idx, test_idx = train_test_split(
+            positions,
+            test_size=spec.test_size,
+            shuffle=spec.shuffle,
+            random_state=spec.seed,
+            stratify=stratify_values,
+        )
+        resamples.append(_resample("repeat_00", train_idx, test_idx, metadata=metadata))
+    elif spec.strategy == ResamplingStrategy.KFOLD:
+        splitter = KFold(
+            n_splits=spec.n_folds,
+            shuffle=spec.shuffle,
+            random_state=spec.seed if spec.shuffle else None,
+        )
+        for fold, (train_idx, test_idx) in enumerate(splitter.split(positions)):
+            resamples.append(
+                _resample(
+                    f"fold_{fold:02d}",
+                    train_idx,
+                    test_idx,
+                    metadata=metadata,
+                    fold=fold,
+                )
+            )
+    elif spec.strategy == ResamplingStrategy.STRATIFIED_KFOLD:
+        if stratify_values is None:
+            raise ValueError("stratified resampling requires stratify values")
+        splitter = StratifiedKFold(
+            n_splits=spec.n_folds,
+            shuffle=spec.shuffle,
+            random_state=spec.seed if spec.shuffle else None,
+        )
+        for fold, (train_idx, test_idx) in enumerate(splitter.split(positions, stratify_values)):
+            resamples.append(
+                _resample(
+                    f"fold_{fold:02d}",
+                    train_idx,
+                    test_idx,
+                    metadata=metadata,
+                    fold=fold,
+                )
+            )
+    elif spec.strategy == ResamplingStrategy.GROUP_KFOLD:
+        if group_values is None:
+            raise ValueError("grouped resampling requires group values")
+        splitter = GroupKFold(n_splits=spec.n_folds)
+        for fold, (train_idx, test_idx) in enumerate(
+            splitter.split(positions, groups=group_values)
+        ):
+            resamples.append(
+                _resample(
+                    f"fold_{fold:02d}",
+                    train_idx,
+                    test_idx,
+                    metadata=metadata,
+                    fold=fold,
+                )
+            )
+    elif spec.strategy == ResamplingStrategy.BOOTSTRAP:
+        if n_items < 2:
+            raise ValueError(f"bootstrap requires at least two {unit}s")
+        rng = np.random.default_rng(spec.seed)
+        for sample in range(spec.n_samples):
+            for _ in range(100):
+                train_idx = rng.choice(positions, size=n_items, replace=True)
+                test_idx = np.setdiff1d(positions, np.unique(train_idx))
+                if len(test_idx) > 0:
+                    break
+            else:
+                raise RuntimeError(f"could not draw a bootstrap sample with out-of-bag {unit}s")
+            resamples.append(
+                _resample(
+                    f"sample_{sample:02d}",
+                    train_idx,
+                    test_idx,
+                    metadata=metadata,
+                    sample=sample,
+                )
+            )
+    else:
+        raise NotImplementedError(f"resampling does not support {spec.strategy.value}")
+
+    if spec.valid_size is not None:
+        resamples = [
+            _with_validation_split(
+                resample,
+                spec=spec,
+                stratify_values=stratify_values,
+                group_values=group_values,
+            )
+            for resample in resamples
+        ]
+    return resamples
+
+
+def _with_validation_split(
+    resample: Resample,
+    *,
+    spec: ResamplingSpec,
+    stratify_values: np.ndarray | None,
+    group_values: np.ndarray | None,
+) -> Resample:
+    if spec.strategy == ResamplingStrategy.GROUP_KFOLD:
+        if group_values is None:
+            raise ValueError("grouped validation requires group values")
+        splitter = GroupShuffleSplit(
+            n_splits=1,
+            test_size=spec.valid_size,
+            random_state=spec.seed,
+        )
+        train_pos, valid_pos = next(
+            splitter.split(resample.train_idx, groups=group_values[resample.train_idx])
+        )
+        train_idx = resample.train_idx[train_pos]
+        valid_idx = resample.train_idx[valid_pos]
+    else:
+        train_stratify = None if stratify_values is None else stratify_values[resample.train_idx]
+        shuffle = spec.shuffle or train_stratify is not None
+        train_idx, valid_idx = train_test_split(
+            resample.train_idx,
+            test_size=spec.valid_size,
+            shuffle=shuffle,
+            random_state=spec.seed if shuffle else None,
+            stratify=train_stratify,
+        )
+
+    return Resample(
+        id=resample.id,
+        train_idx=train_idx,
+        valid_idx=valid_idx,
+        test_idx=resample.test_idx,
+        metadata={**resample.metadata, "valid_size": spec.valid_size},
+    )
+
+
+def _resample(
+    id: str,
+    train_idx: Any,
+    test_idx: Any,
+    *,
+    metadata: dict[str, Any],
+    fold: int | None = None,
+    sample: int | None = None,
+) -> Resample:
+    resample_metadata = dict(metadata)
+    if fold is not None:
+        resample_metadata["fold"] = fold
+    if sample is not None:
+        resample_metadata["sample"] = sample
+    return Resample(
+        id=id,
+        train_idx=train_idx,
+        test_idx=test_idx,
+        metadata=resample_metadata,
+    )
 
 
 def _index_array(values: Any, name: str) -> np.ndarray:
