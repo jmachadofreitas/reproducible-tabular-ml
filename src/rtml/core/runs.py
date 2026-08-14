@@ -12,7 +12,7 @@ from rtml.core.studies import Study
 from rtml.core.tasks import TaskType
 
 
-@dataclass(frozen=True)
+@dataclass
 class ExecutionResources:
     """Scheduler-facing resource hints for one `RunSpec`.
 
@@ -27,7 +27,7 @@ class ExecutionResources:
     custom: dict[str, float] = field(default_factory=dict)
 
 
-@dataclass(frozen=True)
+@dataclass
 class RunSpec:
     """Planned input for one case/method/resample/seed execution."""
 
@@ -39,7 +39,7 @@ class RunSpec:
     scheduler_resources: ExecutionResources = field(default_factory=ExecutionResources)
 
 
-@dataclass(frozen=True)
+@dataclass
 class ExecutionPlan:
     """Materialized collection of `RunSpec` objects."""
 
@@ -128,11 +128,15 @@ class ExecutionPlan:
         )
 
 
-@dataclass(frozen=True)
+@dataclass
 class RunRecord:
-    """Observed output and reproducibility metadata for one executed run."""
+    """Observed output for one logical run key.
 
-    run_id: str
+    ``run_key`` identifies the planned case/method/resample/seed combination. It
+    is repeatable evidence, not a globally unique execution or tracking ID.
+    """
+
+    run_key: str
     case_name: str
     dataset_name: str
     task_name: str
@@ -155,7 +159,7 @@ class RunRecord:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
-@dataclass(frozen=True)
+@dataclass
 class RunResult:
     predictions: PredictionSet | None
     record: RunRecord

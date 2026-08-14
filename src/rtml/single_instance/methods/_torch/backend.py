@@ -6,7 +6,6 @@ from typing import Any, Protocol
 import joblib
 import numpy as np
 import torch
-from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader, TensorDataset
 
 from rtml.core.benchmarks import BenchmarkCase
@@ -30,7 +29,6 @@ from rtml.methods.engines.core import Evaluator, Trainer, resolve_device, seed_t
 from rtml.methods.engines.fitting import fit_model_bundle
 from rtml.methods.engines.task_adapters import (
     infer_score_mode,
-    require_supervised_target,
     resolve_score_metric,
     target_tensors,
 )
@@ -105,16 +103,8 @@ class TorchBackend(MethodBackend):
             raise ValueError("torch backend does not support sample-weighted tasks")
         resample = case.resampling.get_resample(resample_id)
         fit_config = TorchFitConfig.from_mapping(method.fit)
-        resample = self._with_validation_split(
-            case=case,
-            resample=resample,
-            fit_config=fit_config,
-            seed=seed,
-        )
         device = resolve_device(runtime)
-        generator = seed_torch(
-            seed, deterministic=None if runtime is None else runtime.deterministic
-        )
+        generator = seed_torch(seed)
         transform_config = dict(method.transform)
         policy = transform_config.pop("policy", "neural_default")
 
@@ -151,6 +141,7 @@ class TorchBackend(MethodBackend):
             score_name=score_metric.name,
             score_mode=score_mode,
             device=device,
+            deterministic=None if runtime is None else runtime.deterministic,
             logger=logger,
             checkpoint_manager=self._build_checkpoint_manager(
                 case=case,
@@ -212,10 +203,7 @@ class TorchBackend(MethodBackend):
         fit_config = TorchFitConfig.from_mapping(method.fit)
         self._validate_refit_config(fit_config)
         device = resolve_device(runtime)
-        generator = seed_torch(
-            seed,
-            deterministic=None if runtime is None else runtime.deterministic,
-        )
+        generator = seed_torch(seed)
         transform_config = dict(method.transform)
         policy = transform_config.pop("policy", "neural_default")
 
@@ -253,6 +241,7 @@ class TorchBackend(MethodBackend):
             score_name=score_metric.name,
             score_mode=infer_score_mode(score_metric),
             device=device,
+            deterministic=None if runtime is None else runtime.deterministic,
             logger=logger,
         )
         fit_time = perf_counter() - fit_start
@@ -318,9 +307,7 @@ class TorchBackend(MethodBackend):
             target=task_data["target"],
             sample_weight=task_data.get("sample_weight"),
             groups=task_data.get("groups", []),
-            timestamp=task_data.get("timestamp"),
             sensitive_attributes=task_data.get("sensitive_attributes", []),
-            context=task_data.get("context", []),
             metrics=[MetricSpec(**metric) for metric in task_data.get("metrics", [])],
             primary_metric=task_data.get("primary_metric"),
             metadata=task_data.get("metadata", {}),
@@ -366,54 +353,12 @@ class TorchBackend(MethodBackend):
 
     @staticmethod
     def _validate_refit_config(fit_config: TorchFitConfig) -> None:
-        if fit_config.validation_fraction:
-            raise ValueError("torch refit uses all rows and cannot create a validation split")
         if fit_config.early_stopping_patience is not None:
             raise ValueError("torch refit cannot use early stopping without validation data")
         checkpoint = fit_config.checkpoint
         checkpoint_enabled = bool(checkpoint.get("enabled", bool(checkpoint.get("resume_from"))))
         if checkpoint_enabled:
             raise ValueError("torch refit artifacts are separate from resumable checkpoints")
-
-    @staticmethod
-    def _with_validation_split(
-        *,
-        case: BenchmarkCase,
-        resample: Resample,
-        fit_config: TorchFitConfig,
-        seed: int,
-    ) -> Resample:
-        if fit_config.validation_fraction <= 0:
-            return resample
-        if resample.valid_idx is not None:
-            raise ValueError(
-                "validation is defined by both resample.valid_idx and fit.validation_fraction"
-            )
-
-        target = require_supervised_target(case)
-        stratify = None
-        if case.task.task_type in {
-            TaskType.BINARY_CLASSIFICATION,
-            TaskType.MULTICLASS_CLASSIFICATION,
-        }:
-            stratify = target.iloc[resample.train_idx]
-        train_idx, valid_idx = train_test_split(
-            resample.train_idx,
-            test_size=fit_config.validation_fraction,
-            random_state=seed,
-            shuffle=True,
-            stratify=stratify,
-        )
-        return Resample(
-            id=resample.id,
-            train_idx=train_idx,
-            valid_idx=valid_idx,
-            test_idx=resample.test_idx,
-            metadata={
-                **resample.metadata,
-                "validation_fraction": fit_config.validation_fraction,
-            },
-        )
 
     def _prepare_data(
         self,
@@ -509,8 +454,15 @@ class TorchBackend(MethodBackend):
     ) -> CheckpointManager | None:
         config = dict(bundle.fit_config.checkpoint)
         config.setdefault("save_best", resample.valid_idx is not None)
+        checkpoint_root = config.pop("dir", None)
+        resume_from = config.get("resume_from")
+        if checkpoint_root is None:
+            if not config.get("enabled", bool(resume_from)):
+                return None
+            raise ValueError("checkpoint.dir is required when checkpointing is enabled")
+        config.setdefault("require_empty", resume_from in {None, "", False})
         directory = checkpoint_directory(
-            config.pop("dir", ".runs/checkpoints"),
+            checkpoint_root,
             case_name=case.name,
             method_name=method.name,
             resample_id=resample.id,
@@ -559,14 +511,12 @@ class TorchBackend(MethodBackend):
             "batch_size": bundle.fit_config.batch_size,
             **dict(bundle.metadata),
         }
-        if bundle.fit_config.tracking.get("store_history", False):
-            metadata["train_history"] = trainer.train_history
-            metadata["validation_history"] = trainer.validation_history
-            metadata["test_history"] = trainer.test_history
         if trainer.last_checkpoint_path is not None:
             metadata["last_checkpoint_path"] = trainer.last_checkpoint_path
         if trainer.best_checkpoint_path is not None:
             metadata["best_checkpoint_path"] = trainer.best_checkpoint_path
         if trainer.resume_checkpoint_path is not None:
             metadata["resume_checkpoint_path"] = trainer.resume_checkpoint_path
+        if trainer.best_epoch is not None:
+            metadata["selected_epoch"] = trainer.best_epoch
         return metadata

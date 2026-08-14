@@ -6,7 +6,7 @@ import pytest
 
 import rtml.single_instance.datasets.openml_loaders as openml_loaders
 from rtml.core.benchmarks import BenchmarkSuite
-from rtml.core.datasets import FeatureKind
+from rtml.core.datasets import FeatureKind, FeatureTag
 from rtml.core.resampling import ResamplingStrategy
 from rtml.core.tasks import TaskType
 from rtml.single_instance.datasets.openml_loaders import DEFAULT_OPENML_SPLIT
@@ -76,6 +76,8 @@ def test_load_openml_benchmark_case_builds_dataset_task_and_resampling(monkeypat
     assert benchmark_case.dataset.schema.get("age").kind == FeatureKind.NUMERIC
     assert benchmark_case.dataset.schema.get("workclass").kind == FeatureKind.CATEGORICAL
     assert benchmark_case.dataset.schema.get("income").kind == FeatureKind.BINARY
+    assert FeatureTag.MISSING_VALUES in benchmark_case.dataset.schema.get("age").tags
+    assert FeatureTag.MISSING_VALUES in benchmark_case.dataset.schema.get("workclass").tags
     assert benchmark_case.task.task_type == TaskType.BINARY_CLASSIFICATION
     assert benchmark_case.task.source == ["age", "workclass"]
     assert benchmark_case.task.primary_metric == "roc_auc"

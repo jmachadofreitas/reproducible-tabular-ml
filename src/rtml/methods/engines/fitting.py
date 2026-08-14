@@ -1,4 +1,5 @@
-from typing import Any
+from contextlib import contextmanager
+from typing import Any, Iterator
 
 import torch
 from torch.utils.data import DataLoader
@@ -10,6 +11,20 @@ from rtml.methods.engines.core import Evaluator, Trainer
 from rtml.methods.engines.optim import create_lr_scheduler, create_optimizer
 
 
+@contextmanager
+def _deterministic_algorithms(enabled: bool | None) -> Iterator[None]:
+    if enabled is None:
+        yield
+        return
+    previous_enabled = torch.are_deterministic_algorithms_enabled()
+    previous_warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
+    torch.use_deterministic_algorithms(enabled, warn_only=True)
+    try:
+        yield
+    finally:
+        torch.use_deterministic_algorithms(previous_enabled, warn_only=previous_warn_only)
+
+
 def fit_model_bundle(
     bundle: TorchModelBundle,
     train_dataloader: DataLoader,
@@ -19,6 +34,7 @@ def fit_model_bundle(
     score_name: str,
     score_mode: str,
     device: torch.device,
+    deterministic: bool | None = None,
     logger: Logger | None = None,
     checkpoint_manager: CheckpointManager | None = None,
 ) -> Trainer:
@@ -63,15 +79,14 @@ def fit_model_bundle(
         else dict(bundle.fit_config.lr_scheduler),
         max_epochs=bundle.fit_config.max_epochs,
     )
-    if bundle.fit_config.hp_scheduler is not None:
-        raise NotImplementedError(
-            "hp_scheduler requires method-owned hyperparameter state; "
-            "construct it with create_hp_scheduler and pass it to Trainer"
-        )
+    if bundle.fit_config.hp_scheduler is not None and bundle.hp_scheduler is None:
+        raise ValueError("this torch model does not support hyperparameter scheduling")
     trainer = Trainer(
         bundle.create_training_step(optimizer),
         train_metrics=bundle.make_train_metrics(),
         lr_scheduler=lr_scheduler,
+        hp_scheduler=bundle.hp_scheduler,
+        model=bundle.model,
         val_evaluator=validation_evaluator,
         test_evaluator=test_evaluator,
         score_name=score_name,
@@ -91,13 +106,24 @@ def fit_model_bundle(
         }
         if lr_scheduler is not None:
             objects["lr_scheduler"] = lr_scheduler
+        if bundle.hp_scheduler is not None:
+            objects["hp_scheduler"] = bundle.hp_scheduler
         checkpoint_manager.set_objects(objects)
         resume_path = checkpoint_manager.load_resume_checkpoint()
         trainer.resume_checkpoint_path = None if resume_path is None else str(resume_path)
 
-    trainer.train(
-        train_dataloader,
-        val_dataloader=validation_dataloader,
-        test_dataloader=test_dataloader if test_evaluator is not None else None,
-    )
+    with _deterministic_algorithms(deterministic):
+        trainer.train(
+            train_dataloader,
+            val_dataloader=validation_dataloader,
+            test_dataloader=test_dataloader if test_evaluator is not None else None,
+        )
+    if checkpoint_manager is not None and checkpoint_manager.save_best:
+        restored_epoch = checkpoint_manager.restore_best_model(bundle.model)
+    else:
+        restored_epoch = None
+    if restored_epoch is None:
+        trainer.restore_best_model()
+    else:
+        trainer.best_epoch = restored_epoch
     return trainer

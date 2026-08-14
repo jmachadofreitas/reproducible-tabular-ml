@@ -1,15 +1,15 @@
 """Readable local artifacts for benchmark cases and executed runs."""
 
+import json
 import os
 import shutil
 import tempfile
-from dataclasses import asdict, replace
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
 from rtml.core.benchmarks import BenchmarkCase
 from rtml.core.datasets import Dataset, dataset_source
-from rtml.core.results import PredictionSet
 from rtml.core.runs import ExecutionPlan, RunResult, RunSpec
 from rtml.core.serialization import JSONEncoder
 from rtml.multi_instance.datasets.base import MultiInstanceDataset
@@ -66,11 +66,17 @@ def save_run_artifacts(
     artifact_dir: str | Path | None,
 ) -> RunResult:
     """Save one run record and optional predictions beside its case evidence."""
-    if artifact_dir is None:
-        return replace(
-            result,
-            predictions=_with_run_identity(result),
+    predictions = result.predictions
+    if predictions is not None:
+        predictions.metadata.update(
+            {
+                "run_key": result.record.run_key,
+                "case_name": result.record.case_name,
+                "seed": result.record.seed,
+            }
         )
+    if artifact_dir is None:
+        return result
 
     root = Path(artifact_dir)
     record = result.record
@@ -84,15 +90,9 @@ def save_run_artifacts(
     case_path = _case_path(root, case.name)
     run_path = run_dir / "run.json"
     prediction_path = run_dir / "predictions.npz" if result.predictions is not None else None
-    record = replace(
-        record,
-        case_path=str(case_path),
-        run_path=str(run_path),
-        prediction_path=None if prediction_path is None else str(prediction_path),
-    )
-    result = replace(result, record=record)
-    predictions = _with_run_identity(result)
-    result = replace(result, predictions=predictions)
+    record.case_path = str(case_path)
+    record.run_path = str(run_path)
+    record.prediction_path = None if prediction_path is None else str(prediction_path)
 
     # Serialize first so unsupported metadata cannot leave partial artifacts.
     run_text = (
@@ -104,6 +104,8 @@ def save_run_artifacts(
         )
         + "\n"
     )
+    run_dir.parent.mkdir(parents=True, exist_ok=True)
+    temporary_dir = Path(tempfile.mkdtemp(prefix=f".{run_dir.name}.", dir=run_dir.parent))
     try:
         if predictions is not None and prediction_path is not None:
             save_prediction_set(predictions, temporary_dir / prediction_path.name)
@@ -188,7 +190,7 @@ def _run_payload(result: RunResult, *, run_dir: Path, case_path: Path) -> dict[s
     record = result.record
     return {
         "run": {
-            "id": record.run_id,
+            "key": record.run_key,
             "case_name": record.case_name,
             "selected_resample_id": record.resample_id,
             "seed": record.seed,
@@ -209,22 +211,6 @@ def _run_payload(result: RunResult, *, run_dir: Path, case_path: Path) -> dict[s
             "error": record.error,
         },
     }
-
-
-def _with_run_identity(result: RunResult) -> PredictionSet | None:
-    predictions = result.predictions
-    if predictions is None:
-        return None
-    record = result.record
-    return replace(
-        predictions,
-        metadata={
-            **dict(predictions.metadata or {}),
-            "run_id": record.run_id,
-            "case_name": record.case_name,
-            "seed": record.seed,
-        },
-    )
 
 
 def _case_path(root: Path, case_name: str) -> Path:

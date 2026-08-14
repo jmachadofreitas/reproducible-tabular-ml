@@ -93,7 +93,7 @@ def test_multi_instance_dataset_uses_offsets_for_bag_storage() -> None:
     assert dataset.n_instances == 6
     assert dataset.bag_size(1) == 3
     assert dataset.bag_instances(1)["x_00"].tolist() == [2.0, 2.2, 2.4]
-    assert dataset.select_instance_features(kinds=[FeatureKind.NUMERIC]) == [
+    assert dataset.instance_schema.select(kinds=[FeatureKind.NUMERIC]) == [
         "x_00",
         "x_01",
     ]
@@ -120,6 +120,47 @@ def test_multi_instance_dataset_rejects_bad_offsets() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    "offsets",
+    [np.array([0.0, 2.0, 5.0, 6.0]), np.array([False, True, True, True])],
+)
+def test_multi_instance_dataset_rejects_non_integer_offsets(offsets) -> None:
+    dataset = make_mil_dataset()
+
+    with pytest.raises(TypeError, match="bag_offsets must contain integers"):
+        MultiInstanceDataset(
+            name="bad",
+            bag_table=dataset.bag_table,
+            instance_table=dataset.instance_table,
+            bag_schema=dataset.bag_schema,
+            instance_schema=dataset.instance_schema,
+            bag_offsets=offsets,
+        )
+
+
+@pytest.mark.parametrize("table", ["bag", "instance"])
+def test_multi_instance_dataset_rejects_non_string_column_names(table) -> None:
+    dataset = make_mil_dataset()
+    bag_table = (
+        dataset.bag_table.rename(columns={"target": 1}) if table == "bag" else dataset.bag_table
+    )
+    instance_table = (
+        dataset.instance_table.rename(columns={"x_00": 1})
+        if table == "instance"
+        else dataset.instance_table
+    )
+
+    with pytest.raises(TypeError, match="column names must be strings"):
+        MultiInstanceDataset(
+            name="bad",
+            bag_table=bag_table,
+            instance_table=instance_table,
+            bag_schema=dataset.bag_schema,
+            instance_schema=dataset.instance_schema,
+            bag_offsets=dataset.bag_offsets,
+        )
+
+
 def test_multi_instance_select_bags_builds_contiguous_offsets() -> None:
     dataset = make_mil_dataset()
 
@@ -136,6 +177,21 @@ def test_multi_instance_getitem_selects_bags() -> None:
 
     assert offsets.tolist() == [0, 3]
     assert instances["x_00"].tolist() == [2.0, 2.2, 2.4]
+
+
+def test_multi_instance_getitem_uses_python_negative_positions() -> None:
+    dataset = make_mil_dataset()
+
+    instances, offsets = dataset[-1]
+
+    assert offsets.tolist() == [0, 1]
+    assert instances["x_00"].tolist() == [3.0]
+
+
+@pytest.mark.parametrize("positions", [[1.5], [True, False], np.array([[0, 1]])])
+def test_multi_instance_getitem_rejects_invalid_positions(positions) -> None:
+    with pytest.raises((TypeError, ValueError)):
+        make_mil_dataset()[positions]
 
 
 def test_multi_instance_select_bags_allows_repeated_positions() -> None:
@@ -182,6 +238,26 @@ def test_multi_instance_resampling_indices_are_bag_positions() -> None:
     assert set(plan.resamples[0].train_idx).union(plan.resamples[0].test_idx) == {0, 1, 2}
     assert plan.metadata["paradigm"] == "multi_instance"
     assert plan.resamples[0].metadata["unit"] == "bag"
+
+
+def test_multi_instance_holdout_without_shuffle_ignores_the_seed() -> None:
+    dataset = make_mil_dataset()
+    spec = ResamplingSpec(
+        name="ordered_holdout",
+        strategy=ResamplingStrategy.HOLDOUT,
+        test_size=1 / 3,
+        shuffle=False,
+        seed=7,
+    )
+
+    plan = build_multi_instance_resampling_plan(
+        dataset=dataset,
+        task=make_mil_task(),
+        spec=spec,
+    )
+
+    assert plan.resamples[0].train_idx.tolist() == [0, 1]
+    assert plan.resamples[0].test_idx.tolist() == [2]
 
 
 def test_multi_instance_bootstrap_repeats_bags_and_uses_out_of_bag_test_set() -> None:

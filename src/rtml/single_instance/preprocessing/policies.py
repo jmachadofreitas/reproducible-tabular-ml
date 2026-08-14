@@ -19,13 +19,6 @@ from rtml.core.tasks import TaskSpec
 PreprocessorBuilder = Callable[[Dataset, TaskSpec, Mapping[str, Any]], ColumnTransformer]
 
 
-def _one_hot_encoder(**kwargs: Any) -> OneHotEncoder:
-    try:
-        return OneHotEncoder(sparse_output=False, **kwargs)
-    except TypeError:
-        return OneHotEncoder(sparse=False, **kwargs)
-
-
 def _task_source_columns(
     dataset: Dataset,
     task: TaskSpec,
@@ -37,7 +30,7 @@ def _task_source_columns(
 ) -> list[str]:
     task.validate_columns(dataset)
     selected = set(
-        dataset.select(
+        dataset.schema.select(
             kinds=kinds,
             include_tags=include_tags or [],
             exclude_tags=exclude_tags or [],
@@ -49,7 +42,7 @@ def _task_source_columns(
 
 def _validate_supported_source_columns(dataset: Dataset, task: TaskSpec) -> None:
     supported = set(
-        dataset.select(
+        dataset.schema.select(
             kinds=[
                 FeatureKind.NUMERIC,
                 FeatureKind.CATEGORICAL,
@@ -125,7 +118,7 @@ def _zero_inflated_numeric_pipeline(options: Mapping[str, Any], *, use_imputer: 
 
 def _one_hot_pipeline(options: Mapping[str, Any], *, use_imputer: bool) -> Pipeline:
     return _with_optional_imputer(
-        [("encoder", _one_hot_encoder(handle_unknown="ignore"))],
+        [("encoder", OneHotEncoder(sparse_output=False, handle_unknown="ignore"))],
         use_imputer=use_imputer,
         strategy=options.get("categorical_impute", "most_frequent"),
     )
@@ -136,7 +129,8 @@ def _infrequent_one_hot_pipeline(options: Mapping[str, Any], *, use_imputer: boo
         [
             (
                 "encoder",
-                _one_hot_encoder(
+                OneHotEncoder(
+                    sparse_output=False,
                     handle_unknown="infrequent_if_exist",
                     min_frequency=options.get("high_cardinality_min_frequency"),
                     max_categories=options.get("high_cardinality_max_categories", 20),

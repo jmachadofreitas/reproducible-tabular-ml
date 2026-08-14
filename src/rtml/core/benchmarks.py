@@ -23,11 +23,21 @@ class BenchmarkCase(Generic[DatasetT, TaskT]):
 
     def __post_init__(self) -> None:
         if not self.name:
-            raise ValueError("benchmark task name must be non-empty")
+            raise ValueError("benchmark case name must be non-empty")
         if self.resampling.dataset_name != self.dataset.name:
             raise ValueError("resampling plan dataset name must match the benchmark dataset")
         if self.resampling.task_name != self.task.name:
             raise ValueError("resampling plan task name must match the benchmark task")
+        dataset_size = len(self.dataset)
+        for resample in self.resampling.resamples:
+            for name in ("train_idx", "valid_idx", "test_idx"):
+                positions = getattr(resample, name)
+                if positions is not None and (
+                    (positions < 0).any() or (positions >= dataset_size).any()
+                ):
+                    raise IndexError(
+                        f"resample {resample.id!r} has {name} outside dataset positions"
+                    )
         self.metadata = dict(self.metadata or {})
 
 

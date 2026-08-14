@@ -21,7 +21,6 @@ class PredictionSet:
     scores: np.ndarray | None = None
     values: np.ndarray | None = None
 
-    subgroups: dict[str, np.ndarray] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -42,14 +41,4 @@ class PredictionSet:
                 )
             setattr(self, name, array)
 
-        subgroups = {}
-        for name, values in self.subgroups.items():
-            array = np.asarray(values)
-            if array.ndim != 1 or len(array) != sample_count:
-                raise ValueError(
-                    f"subgroup {name!r} must be one-dimensional with length {sample_count}, "
-                    f"got shape {array.shape}"
-                )
-            subgroups[name] = array
-        self.subgroups = subgroups
         self.metadata = dict(self.metadata or {})

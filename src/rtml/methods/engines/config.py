@@ -10,7 +10,6 @@ class TorchFitConfig:
         *,
         batch_size: int = 32,
         max_epochs: int = 10,
-        validation_fraction: float = 0.0,
         validation_every_n_epochs: int = 1,
         early_stopping_patience: int | None = None,
         tracking: Mapping[str, Any] | None = None,
@@ -21,7 +20,6 @@ class TorchFitConfig:
     ) -> None:
         self.batch_size = int(batch_size)
         self.max_epochs = int(max_epochs)
-        self.validation_fraction = float(validation_fraction or 0.0)
         self.validation_every_n_epochs = int(validation_every_n_epochs)
         self.early_stopping_patience = (
             None if early_stopping_patience is None else int(early_stopping_patience)
@@ -40,7 +38,6 @@ class TorchFitConfig:
         fit = cls(
             batch_size=values.pop("batch_size", 32),
             max_epochs=values.pop("max_epochs", 10),
-            validation_fraction=values.pop("validation_fraction", 0.0),
             validation_every_n_epochs=values.pop("validation_every_n_epochs", 1),
             early_stopping_patience=values.pop("early_stopping_patience", None),
             tracking=values.pop("tracking", None),
@@ -63,8 +60,6 @@ class TorchFitConfig:
             raise ValueError("validation_every_n_epochs must be >= 1")
         if self.early_stopping_patience is not None and self.early_stopping_patience < 1:
             raise ValueError("early_stopping_patience must be >= 1")
-        if self.validation_fraction and not 0.0 < self.validation_fraction < 1.0:
-            raise ValueError("validation_fraction must be between 0 and 1")
-        unknown_tracking = sorted(set(self.tracking) - {"log_test_metrics", "store_history"})
+        unknown_tracking = sorted(set(self.tracking) - {"log_test_metrics"})
         if unknown_tracking:
             raise ValueError(f"unknown torch tracking config: {', '.join(unknown_tracking)}")

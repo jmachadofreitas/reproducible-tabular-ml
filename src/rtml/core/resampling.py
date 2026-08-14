@@ -16,11 +16,17 @@ class ResamplingStrategy(str, Enum):
     BOOTSTRAP = "bootstrap"
     # OpenML exposes the saved split indices, but the strategy may not be there.
     UNKNOWN_OPENML_TASK = "unknown_openml_task"
-    UNKNOWN = "unknown"
 
 
 @dataclass
 class Resample:
+    """Materialized train, optional validation, and test positions for one run.
+
+    Methods may use ``valid_idx`` for training control. Methods without a
+    validation phase should fit on both ``train_idx`` and ``valid_idx`` while
+    keeping ``test_idx`` untouched.
+    """
+
     id: str
     train_idx: np.ndarray
     test_idx: np.ndarray
@@ -28,9 +34,19 @@ class Resample:
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        self.train_idx = np.asarray(self.train_idx, dtype=int)
-        self.test_idx = np.asarray(self.test_idx, dtype=int)
-        self.valid_idx = None if self.valid_idx is None else np.asarray(self.valid_idx, dtype=int)
+        self.train_idx = _index_array(self.train_idx, "train_idx")
+        self.test_idx = _index_array(self.test_idx, "test_idx")
+        self.valid_idx = (
+            None if self.valid_idx is None else _index_array(self.valid_idx, "valid_idx")
+        )
+        partitions = {"train_idx": self.train_idx, "test_idx": self.test_idx}
+        if self.valid_idx is not None:
+            partitions["valid_idx"] = self.valid_idx
+        names = list(partitions)
+        for index, left_name in enumerate(names):
+            for right_name in names[index + 1 :]:
+                if np.intersect1d(partitions[left_name], partitions[right_name]).size:
+                    raise ValueError(f"{left_name} and {right_name} must not overlap")
         self.metadata = dict(self.metadata or {})
 
 
@@ -54,6 +70,10 @@ class ResamplingSpec:
         if not self.name:
             raise ValueError("resampling name must be non-empty")
         self.strategy = ResamplingStrategy(self.strategy)
+        if self.strategy == ResamplingStrategy.STRATIFIED_HOLDOUT:
+            # sklearn stratified holdout requires shuffling. Keep the recorded
+            # specification aligned with the split that will be materialized.
+            self.shuffle = True
         self.groups = list(self.groups)
         self.metadata = dict(self.metadata or {})
         self._validate()
@@ -141,3 +161,12 @@ class ResamplingPlan:
             if resample.id == resample_id:
                 return resample
         raise ValueError(f"unknown resample id {resample_id!r}")
+
+
+def _index_array(values: Any, name: str) -> np.ndarray:
+    array = np.asarray(values)
+    if array.ndim != 1:
+        raise ValueError(f"{name} must be one-dimensional")
+    if array.size and array.dtype.kind not in {"i", "u"}:
+        raise TypeError(f"{name} must contain integer positions")
+    return array.astype(int, copy=False)

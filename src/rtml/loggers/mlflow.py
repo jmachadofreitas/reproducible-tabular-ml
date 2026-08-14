@@ -105,7 +105,7 @@ class MLflowWriter:
         self._mlflow.log_params(params)
 
         tags = {
-            "rtml.run_id": record.run_id,
+            "rtml.run_key": record.run_key,
             "rtml.status": record.status,
             "rtml.dataset": record.dataset_name,
             "rtml.task": record.task_name,

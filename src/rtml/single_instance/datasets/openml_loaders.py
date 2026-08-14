@@ -8,7 +8,7 @@ import openml
 import pandas as pd
 
 from rtml.core.benchmarks import BenchmarkCase, BenchmarkSuite
-from rtml.core.datasets import Dataset, FeatureInfo, FeatureKind, FeatureSchema
+from rtml.core.datasets import Dataset, FeatureInfo, FeatureKind, FeatureSchema, FeatureTag
 from rtml.core.resampling import (
     Resample,
     ResamplingPlan,
@@ -104,6 +104,7 @@ def _build_schema(
             name=column,
             kind=_infer_feature_kind(data[column], is_categorical=is_categorical),
             dtype=str(data[column].dtype),
+            tags={FeatureTag.MISSING_VALUES} if data[column].isna().any() else set(),
         )
 
     features[target_name] = FeatureInfo(
@@ -271,6 +272,7 @@ def load_openml_benchmark_case(
     elif not isinstance(y, pd.Series):
         y = pd.Series(y, name=openml_task.target_name)
 
+    x.columns = [str(column) for column in x.columns]
     target_name = str(openml_task.target_name)
     data = pd.concat(
         [x.reset_index(drop=True), y.rename(target_name).reset_index(drop=True)], axis=1

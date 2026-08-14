@@ -35,7 +35,7 @@ def build_multi_instance_resampling_plan(
             bag_indices,
             test_size=spec.test_size,
             shuffle=spec.shuffle,
-            random_state=spec.seed,
+            random_state=spec.seed if spec.shuffle else None,
         )
         resamples.append(_resample("repeat_00", train_idx, test_idx))
     elif spec.strategy == ResamplingStrategy.STRATIFIED_HOLDOUT:

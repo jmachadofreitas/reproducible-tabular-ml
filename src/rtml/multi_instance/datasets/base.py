@@ -1,12 +1,12 @@
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Literal, TypeAlias, overload
+from typing import Any, TypeAlias
 
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
 
-from rtml.core.datasets import FeatureInfo, FeatureKind, FeatureSchema, FeatureTagLike
+from rtml.core.datasets import FeatureKind, FeatureSchema
 
 IndexArray: TypeAlias = npt.NDArray[np.integer[Any]]
 
@@ -50,7 +50,10 @@ class MultiInstanceDataset:
         if not isinstance(self.instance_table, pd.DataFrame):
             raise TypeError("instance_table must be a pandas DataFrame")
 
-        self.bag_offsets = np.asarray(self.bag_offsets, dtype=int)
+        self.bag_offsets = np.asarray(self.bag_offsets)
+        if self.bag_offsets.dtype.kind not in {"i", "u"}:
+            raise TypeError("bag_offsets must contain integers")
+        self.bag_offsets = self.bag_offsets.astype(int, copy=False)
         self.metadata = dict(self.metadata or {})
 
         self._validate_frame_schema(
@@ -65,8 +68,8 @@ class MultiInstanceDataset:
         )
         self._validate_bag_offsets()
 
-        self._bag_columns = {str(column) for column in self.bag_table.columns}
-        self._instance_columns = {str(column) for column in self.instance_table.columns}
+        self._bag_columns = set(self.bag_table.columns)
+        self._instance_columns = set(self.instance_table.columns)
         self._validate_ids()
 
     def __len__(self) -> int:
@@ -142,12 +145,24 @@ class MultiInstanceDataset:
     ) -> tuple[pd.DataFrame, np.ndarray]:
         """Select ordered bag instances and return their relative offsets."""
         if isinstance(bag_positions, int | np.integer):
+            if isinstance(bag_positions, bool | np.bool_):
+                raise TypeError("bag position must be an integer, not a boolean")
             positions = [int(bag_positions)]
         elif isinstance(bag_positions, slice):
             positions = list(range(self.n_bags))[bag_positions]
         else:
-            positions = [int(position) for position in bag_positions]
+            raw_positions = np.asarray(bag_positions)
+            if raw_positions.ndim != 1:
+                raise ValueError("bag positions must be one-dimensional")
+            if raw_positions.size and raw_positions.dtype.kind not in {"i", "u"}:
+                raise TypeError("bag positions must be integers")
+            positions = raw_positions.astype(int, copy=False).tolist()
         positions_array = np.asarray(positions, dtype=int)
+        positions_array = np.where(
+            positions_array < 0,
+            positions_array + self.n_bags,
+            positions_array,
+        )
         if np.any(positions_array < 0) or np.any(positions_array >= self.n_bags):
             raise IndexError("bag position out of range")
 
@@ -162,47 +177,6 @@ class MultiInstanceDataset:
         instances = self.instance_table.iloc[instance_positions].reset_index(drop=True)
         return instances, offsets
 
-    @overload
-    def select_instance_features(
-        self,
-        *,
-        kinds: Iterable[FeatureKind | str] | None = None,
-        include_tags: Iterable[FeatureTagLike] = (),
-        exclude_tags: Iterable[FeatureTagLike] = (),
-        require_all_tags: bool = True,
-        return_features: Literal[False] = False,
-    ) -> list[str]: ...
-
-    @overload
-    def select_instance_features(
-        self,
-        *,
-        kinds: Iterable[FeatureKind | str] | None = None,
-        include_tags: Iterable[FeatureTagLike] = (),
-        exclude_tags: Iterable[FeatureTagLike] = (),
-        require_all_tags: bool = True,
-        return_features: Literal[True],
-    ) -> dict[str, FeatureInfo]: ...
-
-    def select_instance_features(
-        self,
-        *,
-        kinds: Iterable[FeatureKind | str] | None = None,
-        include_tags: Iterable[FeatureTagLike] = (),
-        exclude_tags: Iterable[FeatureTagLike] = (),
-        require_all_tags: bool = True,
-        return_features: bool = False,
-    ) -> list[str] | dict[str, FeatureInfo]:
-        columns = self.instance_schema.select(
-            kinds=kinds,
-            include_tags=include_tags,
-            exclude_tags=exclude_tags,
-            require_all_tags=require_all_tags,
-        )
-        if return_features:
-            return {column: self.instance_schema.get(column) for column in columns}
-        return columns
-
     def _validate_frame_schema(
         self,
         *,
@@ -214,7 +188,11 @@ class MultiInstanceDataset:
             duplicates = frame.columns[frame.columns.duplicated()].tolist()
             raise ValueError(f"{frame_name} contains duplicate columns: {duplicates}")
 
-        frame_columns = [str(column) for column in frame.columns]
+        non_string_columns = [column for column in frame.columns if not isinstance(column, str)]
+        if non_string_columns:
+            raise TypeError(f"{frame_name} column names must be strings: {non_string_columns}")
+
+        frame_columns = list(frame.columns)
         schema_columns = schema.names
         missing_from_schema = [column for column in frame_columns if column not in schema]
         extra_in_schema = [column for column in schema_columns if column not in frame_columns]

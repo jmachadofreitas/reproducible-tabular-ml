@@ -52,7 +52,7 @@ class CheckpointState:
 
 
 class CheckpointManager:
-    """Ignite-backed last/best checkpoint manager for one training run."""
+    """Manage periodic recovery checkpoints and validation-selected best models."""
 
     def __init__(
         self,
@@ -87,14 +87,12 @@ class CheckpointManager:
         self.atomic = atomic
         self.require_empty = require_empty
         self.resume_from = resume_from
+        if self.require_empty and self.directory.is_dir() and any(self.directory.iterdir()):
+            raise ValueError(f"checkpoint directory is not empty: {self.directory}")
         self.state = CheckpointState()
         self._objects: dict[str, Any] = {}
         self._score: float | None = None
         self.best_score = float("inf") if score_mode == "min" else float("-inf")
-        self.last_path: Path | None = None
-        self.best_path: Path | None = None
-        self.saved_paths: list[Path] = []
-
         self._last_handler = Checkpoint(
             {},
             DiskSaver(
@@ -123,10 +121,10 @@ class CheckpointManager:
         self._objects = {**dict(objects), "checkpoint": self.state}
         self._last_handler.to_save = self._objects
 
-    def should_save(self, epoch: int) -> bool:
+    def should_save_last(self, epoch: int) -> bool:
         return epoch > self.delay_n_epochs and epoch % self.every_n_epochs == 0
 
-    def save(
+    def save_last_checkpoint(
         self,
         *,
         engine: Any,
@@ -134,16 +132,10 @@ class CheckpointManager:
         step: int,
         score_name: str | None = None,
         score: float | None = None,
-    ) -> tuple[Path | None, Path | None]:
+    ) -> Path | None:
         if not self._objects:
             raise ValueError("checkpoint objects must be set before saving")
 
-        self._score = score
-        is_better = False
-        if score is not None:
-            is_better = self._is_better(score)
-            if is_better:
-                self.best_score = score
         self.state.update(
             epoch=epoch,
             step=step,
@@ -151,24 +143,36 @@ class CheckpointManager:
             score=score,
             best_score=None if _is_inf(self.best_score) else self.best_score,
         )
+        if not self.save_last:
+            return None
+        self._last_handler(engine)
+        return _path_or_none(self._last_handler.last_checkpoint)
 
-        last_path = None
-        if self.save_last:
-            self._last_handler(engine)
-            last_path = _path_or_none(self._last_handler.last_checkpoint)
-            self.last_path = last_path
+    def save_best_checkpoint(
+        self,
+        *,
+        engine: Any,
+        epoch: int,
+        step: int,
+        score_name: str,
+        score: float,
+    ) -> Path | None:
+        if not self._objects:
+            raise ValueError("checkpoint objects must be set before saving")
+        if not self.save_best or not self._is_better(score):
+            return None
 
-        best_path = None
-        if self.save_best and is_better:
-            previous_best = self._best_handler.last_checkpoint
-            self._best_handler(engine, self._objects)
-            candidate_best = _path_or_none(self._best_handler.last_checkpoint)
-            if candidate_best is not None and str(candidate_best) != str(previous_best):
-                best_path = candidate_best
-                self.best_path = candidate_best
-
-        self.saved_paths.extend(path for path in (last_path, best_path) if path is not None)
-        return last_path, best_path
+        self.best_score = score
+        self._score = score
+        self.state.update(
+            epoch=epoch,
+            step=step,
+            score_name=score_name,
+            score=score,
+            best_score=score,
+        )
+        self._best_handler(engine, self._objects)
+        return _path_or_none(self._best_handler.last_checkpoint)
 
     def resume_path(self) -> Path | None:
         if self.resume_from in {None, "", False}:
@@ -187,6 +191,18 @@ class CheckpointManager:
         if self.state.best_score is not None:
             self.best_score = self.state.best_score
         return path
+
+    def restore_best_model(self, model: torch.nn.Module) -> int | None:
+        """Restore a saved best model and return its selected epoch."""
+        path = _path_or_none(self._best_handler.last_checkpoint)
+        if path is None and self.n_saved == 1:
+            candidate = self.directory / "best.ckpt"
+            path = candidate if candidate.is_file() else None
+        if path is None:
+            return None
+        checkpoint = load_checkpoint(path, model=model)
+        state = checkpoint.get("checkpoint", {})
+        return int(state["epoch"]) if "epoch" in state else None
 
     def _ignite_score(self, engine: Any) -> float:
         if self._score is None:

@@ -1,11 +1,12 @@
 import warnings
-from collections.abc import Iterable, Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
+from rtml.core.benchmarks import BenchmarkCase
 from rtml.core.metrics import EvaluationMetrics
 from rtml.core.results import PredictionSet
 from rtml.core.tasks import MetricSpec
@@ -17,22 +18,52 @@ from rtml.results.reports import Row, save_rows
 def subgroup_metric_rows(
     rows: list[Row],
     *,
-    metrics_by_task: Mapping[str, Iterable[MetricSpec]],
+    cases: Mapping[str, BenchmarkCase],
+    columns: Sequence[str],
     min_count: int = 1,
 ) -> list[Row]:
-    """Compute subgroup metric rows from saved prediction artifacts."""
+    """Compute subgroup metrics by joining saved predictions to benchmark data."""
+    subgroup_columns = list(dict.fromkeys(columns))
+    if not subgroup_columns:
+        return []
+
     subgroup_rows: list[Row] = []
     for row in rows:
         prediction_path = row.get("prediction_path")
         if not prediction_path:
             continue
+        case_name = str(row.get("case_name", ""))
+        try:
+            case = cases[case_name]
+        except KeyError as exc:
+            raise ValueError(f"no benchmark case supplied for {case_name!r}") from exc
         predictions = load_prediction_set(Path(str(prediction_path)))
-        if not predictions.subgroups:
-            continue
-        metrics = list(metrics_by_task.get(str(row.get("task_name", "")), ()))
+        expected_identity = {
+            "dataset_name": str(row.get("dataset_name", "")),
+            "task_name": str(row.get("task_name", "")),
+            "method_name": str(row.get("method_name", "")),
+            "resample_id": str(row.get("resample_id", "")),
+        }
+        for field, expected in expected_identity.items():
+            if getattr(predictions, field) != expected:
+                raise ValueError(
+                    f"saved predictions {field} does not match report row for run "
+                    f"{row.get('run_key', '')!r}"
+                )
+        resample = case.resampling.get_resample(str(row.get("resample_id", "")))
+        expected_sample_ids = np.asarray(case.dataset.sample_ids_for(resample.test_idx))
+        if expected_sample_ids.dtype.hasobject:
+            expected_sample_ids = expected_sample_ids.astype(str)
+        if not np.array_equal(predictions.sample_ids, expected_sample_ids):
+            raise ValueError(
+                f"saved predictions are not aligned with test samples for case {case_name!r}, "
+                f"resample {resample.id!r}"
+            )
+        subgroup_values = case.dataset.subgroup_values(subgroup_columns, resample.test_idx)
+        metrics = list(case.task.metrics)
         if not metrics:
             continue
-        for subgroup_column, values in predictions.subgroups.items():
+        for subgroup_column, values in subgroup_values.items():
             subgroup_rows.extend(
                 _subgroup_metric_rows(
                     row=row,
@@ -50,7 +81,8 @@ def subgroup_metric_rows(
 def save_subgroup_summary(
     rows: list[Row],
     *,
-    metrics_by_task: Mapping[str, Iterable[MetricSpec]],
+    cases: Mapping[str, BenchmarkCase],
+    columns: Sequence[str],
     csv_path: str | Path | None = None,
     json_path: str | Path | None = None,
     markdown_path: str | Path | None = None,
@@ -59,7 +91,8 @@ def save_subgroup_summary(
     """Save optional subgroup metrics derived from prediction artifacts."""
     subgroup_rows = subgroup_metric_rows(
         rows,
-        metrics_by_task=metrics_by_task,
+        cases=cases,
+        columns=columns,
         min_count=min_count,
     )
     save_rows(subgroup_rows, csv_path=csv_path, json_path=json_path, markdown_path=markdown_path)
@@ -119,7 +152,7 @@ def _base_subgroup_row(
     total: int,
 ) -> Row:
     output_row: Row = {
-        "run_id": row.get("run_id", ""),
+        "run_key": row.get("run_key", ""),
         "case_name": row.get("case_name", ""),
         "dataset_name": row.get("dataset_name", ""),
         "task_name": row.get("task_name", ""),
@@ -175,7 +208,6 @@ def _subset_predictions(predictions: PredictionSet, mask: np.ndarray) -> Predict
         else predictions.probabilities[mask],
         scores=None if predictions.scores is None else predictions.scores[mask],
         values=None if predictions.values is None else predictions.values[mask],
-        subgroups={name: values[mask] for name, values in predictions.subgroups.items()},
     )
 
 
@@ -196,7 +228,7 @@ def _mark_worst_primary_metric_subgroups(rows: list[Row]) -> None:
         metric_value = finite_number(row.get(f"metric.{metric_name}"))
         if metric_value is None:
             continue
-        key = (row.get("run_id"), row.get("subgroup_column"), metric_name)
+        key = (row.get("run_key"), row.get("subgroup_column"), metric_name)
         groups.setdefault(key, []).append(row)
 
     for (_, _, metric_name), group_rows in groups.items():

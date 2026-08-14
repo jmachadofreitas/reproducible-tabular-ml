@@ -25,6 +25,7 @@ class TorchModelBundle:
         create_training_step: CreateTrainingStep,
         evaluation_step: EvaluationStep,
         prediction_step: PredictionStep | None = None,
+        hp_scheduler: Any | None = None,
         train_metrics_factory: RunningMetricsFactory | None = None,
         validation_metrics_factory: RunningMetricsFactory | None = None,
         test_metrics_factory: RunningMetricsFactory | None = None,
@@ -35,6 +36,7 @@ class TorchModelBundle:
         self.fit_config = fit_config
         self.evaluation_step = evaluation_step
         self.prediction_step = prediction_step
+        self.hp_scheduler = hp_scheduler
         self.metadata = dict(metadata or {})
         self._create_training_step = create_training_step
         self._train_metrics_factory = train_metrics_factory

@@ -225,7 +225,7 @@ def load_popstats_dataset(
     task = MultiInstanceTask(
         name=dataset_name,
         task_type=TaskType.REGRESSION,
-        instance_source=dataset.select_instance_features(kinds=[FeatureKind.NUMERIC]),
+        instance_source=dataset.instance_schema.select(kinds=[FeatureKind.NUMERIC]),
         target=TARGET_COLUMN,
         metrics=[
             MetricSpec(name="rmse", greater_is_better=False),

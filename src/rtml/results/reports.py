@@ -1,9 +1,9 @@
-import csv
 import json
-import math
 from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeAlias
+
+import pandas as pd
 
 from rtml.core.serialization import JSONEncoder
 from rtml.results._values import boolean_value, finite_number
@@ -29,7 +29,7 @@ DEFAULT_TIMING_FIELDS = ("fit_time", "predict_time")
 def run_record_row(record: RunRecord) -> Row:
     """Flatten one run record into a summary-table row."""
     row: Row = {
-        "run_id": record.run_id,
+        "run_key": record.run_key,
         "case_name": record.case_name,
         "dataset_name": record.dataset_name,
         "task_name": record.task_name,
@@ -103,8 +103,11 @@ def load_run_summary(path: str | Path) -> list[Row]:
                 raise ValueError(f"expected row objects in {path}")
             rows.append(dict(row))
         return rows
-    with path.open(newline="", encoding="utf-8") as file:
-        return list(csv.DictReader(file))
+    try:
+        frame = pd.read_csv(path, dtype=str, keep_default_na=False)
+    except pd.errors.EmptyDataError:
+        return []
+    return frame.to_dict(orient="records")
 
 
 def aggregate_run_summary(
@@ -194,11 +197,7 @@ def save_aggregate_summary(
 
 def _write_csv(rows: list[Row], path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    fieldnames = _row_fields(rows)
-    with path.open("w", newline="", encoding="utf-8") as file:
-        writer = csv.DictWriter(file, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(rows)
+    pd.DataFrame.from_records(rows, columns=_row_fields(rows)).to_csv(path, index=False)
 
 
 def _write_json(rows: list[Row], path: Path) -> None:
@@ -468,38 +467,17 @@ def _numeric_values(rows: list[Row], field: str) -> list[float]:
 
 
 def _summary_stats(values: list[float]) -> dict[str, float | int | None]:
-    ordered = sorted(values)
-    q25 = _quantile(ordered, 0.25)
-    q75 = _quantile(ordered, 0.75)
-    mean = sum(ordered) / len(ordered)
+    series = pd.Series(values, dtype=float)
+    q25 = float(series.quantile(0.25))
+    q75 = float(series.quantile(0.75))
     return {
-        "count": len(ordered),
-        "mean": mean,
-        "std": _sample_std(ordered, mean),
-        "min": ordered[0],
+        "count": int(series.count()),
+        "mean": float(series.mean()),
+        "std": None if len(series) < 2 else float(series.std()),
+        "min": float(series.min()),
         "q25": q25,
-        "median": _quantile(ordered, 0.5),
+        "median": float(series.median()),
         "q75": q75,
-        "max": ordered[-1],
+        "max": float(series.max()),
         "iqr": q75 - q25,
     }
-
-
-def _sample_std(values: list[float], mean: float) -> float | None:
-    if len(values) < 2:
-        return None
-    variance = sum((value - mean) ** 2 for value in values) / (len(values) - 1)
-    return math.sqrt(variance)
-
-
-def _quantile(sorted_values: list[float], probability: float) -> float:
-    if len(sorted_values) == 1:
-        return sorted_values[0]
-    position = (len(sorted_values) - 1) * probability
-    lower = math.floor(position)
-    upper = math.ceil(position)
-    if lower == upper:
-        return sorted_values[int(position)]
-    lower_value = sorted_values[lower]
-    upper_value = sorted_values[upper]
-    return lower_value + (upper_value - lower_value) * (position - lower)

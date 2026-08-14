@@ -1,3 +1,4 @@
+import numpy as np
 import pytest
 
 from rtml.core.resampling import (
@@ -20,6 +21,21 @@ def test_resample_normalizes_indices_and_metadata() -> None:
     assert resample.metadata == {"fold": 0}
 
 
+@pytest.mark.parametrize("indices", [[1.5], [True, False], np.array([[0, 1]])])
+def test_resample_rejects_non_positional_indices(indices) -> None:
+    with pytest.raises((TypeError, ValueError)):
+        Resample(id="bad", train_idx=indices, test_idx=[2])
+
+
+def test_resample_rejects_partition_overlap_but_allows_bootstrap_repeats() -> None:
+    with pytest.raises(ValueError, match="train_idx and test_idx must not overlap"):
+        Resample(id="bad", train_idx=[0, 1], test_idx=[1, 2])
+
+    resample = Resample(id="bootstrap", train_idx=[0, 0, 1], test_idx=[2])
+
+    assert resample.train_idx.tolist() == [0, 0, 1]
+
+
 def test_kfold_resampling_spec_requires_multiple_folds() -> None:
     with pytest.raises(ValueError, match="n_folds >= 2"):
         ResamplingSpec(name="bad_kfold", strategy=ResamplingStrategy.KFOLD, n_folds=1)
@@ -35,6 +51,17 @@ def test_stratified_holdout_requires_test_size_and_stratify() -> None:
             strategy=ResamplingStrategy.STRATIFIED_HOLDOUT,
             test_size=0.2,
         )
+
+
+def test_stratified_holdout_records_required_shuffle() -> None:
+    spec = ResamplingSpec(
+        name="stratified",
+        strategy=ResamplingStrategy.STRATIFIED_HOLDOUT,
+        test_size=0.2,
+        stratify="target",
+    )
+
+    assert spec.shuffle is True
 
 
 def test_group_kfold_requires_group_columns() -> None:

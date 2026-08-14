@@ -66,7 +66,6 @@ def build_sklearn_estimator(
     if model_kind == "logistic_regression":
         if task_type == TaskType.REGRESSION:
             raise ValueError("logistic_regression does not support regression tasks")
-        model_params.setdefault("max_iter", 1000)
         model_params.setdefault("random_state", seed)
         return LogisticRegression(**model_params)
 
@@ -212,6 +211,8 @@ class SklearnBackend(MethodBackend):
 
         training_indices = resample.train_idx
         if resample.valid_idx is not None:
+            # This method has no separate validation phase, so all non-test
+            # rows are available for fitting the complete sklearn pipeline.
             training_indices = np.concatenate((training_indices, resample.valid_idx))
         training_data = case.dataset[training_indices]
         x_train = training_data.loc[:, case.task.source]

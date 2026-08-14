@@ -41,8 +41,15 @@ def _require_values(predictions: PredictionSet, metric_name: str) -> np.ndarray:
     return np.asarray(predictions.values)
 
 
-def _binary_or_matrix_probabilities(predictions: PredictionSet) -> np.ndarray:
-    probabilities = _require_probabilities(predictions, "roc_auc")
+def _roc_auc_values(predictions: PredictionSet) -> np.ndarray:
+    if predictions.probabilities is None:
+        if predictions.scores is None:
+            raise ValueError("roc_auc requires probabilities or binary decision scores")
+        scores = np.asarray(predictions.scores)
+        if scores.ndim != 1:
+            raise ValueError("multiclass roc_auc requires class probabilities")
+        return scores
+    probabilities = np.asarray(predictions.probabilities)
     if probabilities.ndim == 2 and probabilities.shape[1] == 2:
         return probabilities[:, 1]
     return probabilities
@@ -58,10 +65,10 @@ def _compute_accuracy(predictions: PredictionSet, kwargs: Mapping[str, Any]) -> 
 
 def _compute_roc_auc(predictions: PredictionSet, kwargs: Mapping[str, Any]) -> float:
     options = dict(kwargs)
-    probabilities = _binary_or_matrix_probabilities(predictions)
-    if probabilities.ndim == 2:
+    values = _roc_auc_values(predictions)
+    if values.ndim == 2:
         options.setdefault("multi_class", "ovr")
-    return float(roc_auc_score(_require_y_true(predictions), probabilities, **options))
+    return float(roc_auc_score(_require_y_true(predictions), values, **options))
 
 
 def _compute_log_loss(predictions: PredictionSet, kwargs: Mapping[str, Any]) -> float:

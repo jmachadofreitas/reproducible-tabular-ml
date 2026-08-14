@@ -115,7 +115,6 @@ class MultiInstanceSklearnBackend(MethodBackend):
         )
         model_params = dict(method.model.params)
         pooling = str(model_params.pop("pooling", "max"))
-        model_params.setdefault("max_iter", 1000)
         model_params.setdefault("random_state", seed)
         estimator = Pipeline(
             [

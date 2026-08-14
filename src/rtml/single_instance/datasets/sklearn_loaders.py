@@ -395,12 +395,13 @@ def build_sklearn_benchmark_case(
     )
 
 
-def load_sklearn_classification_suite() -> BenchmarkSuite:
+def load_sklearn_classification_suite(*, valid_size: float | None = None) -> BenchmarkSuite:
     """Create a small local sklearn classification suite."""
     resampling_spec = ResamplingSpec(
         name="sklearn_classification_stratified_kfold",
         strategy=ResamplingStrategy.STRATIFIED_KFOLD,
         n_folds=5,
+        valid_size=valid_size,
         stratify="target",
         shuffle=True,
         seed=42,
@@ -430,12 +431,13 @@ def load_sklearn_classification_suite() -> BenchmarkSuite:
     )
 
 
-def load_sklearn_regression_suite() -> BenchmarkSuite:
+def load_sklearn_regression_suite(*, valid_size: float | None = None) -> BenchmarkSuite:
     """Create a small local sklearn regression suite."""
     resampling_spec = ResamplingSpec(
         name="sklearn_regression_kfold",
         strategy=ResamplingStrategy.KFOLD,
         n_folds=5,
+        valid_size=valid_size,
         shuffle=True,
         seed=42,
         metadata={"source": "sklearn"},

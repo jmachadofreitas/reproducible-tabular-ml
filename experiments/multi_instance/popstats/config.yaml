@@ -54,8 +54,18 @@ execution:
   artifact_dir: ${hydra:runtime.output_dir}/artifacts
   summary_csv: ${hydra:runtime.output_dir}/summary.csv
   summary_json: ${hydra:runtime.output_dir}/summary.json
+  summary_markdown: ${hydra:runtime.output_dir}/summary.md
   aggregate_csv: ${hydra:runtime.output_dir}/aggregate.csv
   aggregate_json: ${hydra:runtime.output_dir}/aggregate.json
+  aggregate_markdown: ${hydra:runtime.output_dir}/aggregate.md
+
+subgroup_report:
+  enabled: false
+  columns: []
+  min_count: 1
+  csv: ${hydra:runtime.output_dir}/subgroups.csv
+  json: ${hydra:runtime.output_dir}/subgroups.json
+  markdown: ${hydra:runtime.output_dir}/subgroups.md
 
 logger:
   backend: mlflow

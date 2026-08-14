@@ -16,11 +16,10 @@ def test_prediction_set_round_trip_preserves_arrays_and_metadata(tmp_path) -> No
         task_name="binary",
         method_name="logreg_linear",
         resample_id="fold_00",
-        sample_ids=np.array(["r1", "r2", "r3"]),
-        y_true=np.array([0, 1, 1]),
-        labels=np.array([0, 1, 0]),
+        sample_ids=np.array(["r1", "r2", "r3"], dtype=object),
+        y_true=np.array(["no", "yes", "yes"], dtype=object),
+        labels=np.array(["no", "yes", "no"], dtype=object),
         probabilities=np.array([[0.9, 0.1], [0.2, 0.8], [0.6, 0.4]]),
-        subgroups={"site": np.array(["a", "a", "b"])},
         metadata={"case_name": "toy_case"},
     )
 
@@ -36,7 +35,6 @@ def test_prediction_set_round_trip_preserves_arrays_and_metadata(tmp_path) -> No
     np.testing.assert_array_equal(loaded.y_true, predictions.y_true)
     np.testing.assert_array_equal(loaded.labels, predictions.labels)
     np.testing.assert_array_equal(loaded.probabilities, predictions.probabilities)
-    np.testing.assert_array_equal(loaded.subgroups["site"], predictions.subgroups["site"])
     assert loaded.values is None
 
 
@@ -83,16 +81,4 @@ def test_prediction_set_rejects_misaligned_prediction_arrays(field, value) -> No
             resample_id="fold_00",
             sample_ids=[0, 1, 2],
             **{field: value},
-        )
-
-
-def test_prediction_set_rejects_misaligned_subgroups() -> None:
-    with pytest.raises(ValueError, match="subgroup 'site'"):
-        PredictionSet(
-            dataset_name="toy",
-            task_name="task",
-            method_name="method",
-            resample_id="fold_00",
-            sample_ids=[0, 1, 2],
-            subgroups={"site": ["a", "b"]},
         )

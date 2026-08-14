@@ -4,12 +4,16 @@ from typing import Any
 import numpy as np
 import torch
 from ignite.metrics import (
+    ROC_AUC,
     Accuracy,
     Average,
+    EpochMetric,
+    Loss,
     MeanAbsoluteError,
     MeanSquaredError,
     RootMeanSquaredError,
 )
+from sklearn.metrics import roc_auc_score
 from torch import nn
 
 from rtml.core.benchmarks import BenchmarkCase
@@ -120,6 +124,8 @@ def make_train_evaluation_output_formatter(
                 "labels": labels,
                 "y": target.long(),
                 "accuracy": (labels.reshape(-1), target.reshape(-1)),
+                "roc_auc": (probabilities.reshape(-1), target.reshape(-1)),
+                "log_loss": (logits, target.float()),
             }
 
         return format_binary
@@ -135,6 +141,8 @@ def make_train_evaluation_output_formatter(
                 "labels": labels,
                 "y": target,
                 "accuracy": (labels, target),
+                "roc_auc": (probabilities, target),
+                "log_loss": (logits, target),
             }
 
         return format_multiclass
@@ -174,6 +182,16 @@ def make_prediction_output_formatter(task_type: TaskType) -> PredictionOutputFor
     raise ValueError(f"unsupported torch task type: {task_type.value}")
 
 
+def _multiclass_roc_auc(probabilities: torch.Tensor, target: torch.Tensor) -> float:
+    return float(
+        roc_auc_score(
+            target.cpu().numpy(),
+            probabilities.cpu().numpy(),
+            multi_class="ovr",
+        )
+    )
+
+
 def create_torch_metrics(
     task_type: TaskType,
     metric_names: Sequence[str] = (),
@@ -199,6 +217,15 @@ def create_torch_metrics(
         metrics = {"loss": IgniteMetric(Average())}
         if not requested or "accuracy" in requested:
             metrics["accuracy"] = IgniteMetric(Accuracy())
+        if "roc_auc" in requested:
+            roc_auc = (
+                ROC_AUC()
+                if task_type == TaskType.BINARY_CLASSIFICATION
+                else EpochMetric(_multiclass_roc_auc)
+            )
+            metrics["roc_auc"] = IgniteMetric(roc_auc)
+        if "log_loss" in requested:
+            metrics["log_loss"] = IgniteMetric(Loss(create_loss_fn(task_type)))
         return RunningMetrics(metrics)
     raise ValueError(f"unsupported torch task type: {task_type.value}")
 

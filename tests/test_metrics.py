@@ -52,6 +52,24 @@ def test_evaluation_metrics_only_computes_requested_metrics() -> None:
     assert EvaluationMetrics([]).compute(predictions) == {}
 
 
+def test_binary_roc_auc_accepts_decision_scores_without_probabilities() -> None:
+    predictions = PredictionSet(
+        dataset_name="toy",
+        task_name="binary",
+        method_name="margin_model",
+        resample_id="fold_00",
+        sample_ids=[0, 1, 2, 3],
+        y_true=[0, 1, 1, 0],
+        scores=[-2.0, 1.0, 2.0, -1.0],
+    )
+
+    metrics = EvaluationMetrics([MetricSpec(name="roc_auc", greater_is_better=True)]).compute(
+        predictions
+    )
+
+    assert metrics == {"roc_auc": 1.0}
+
+
 def test_regression_metrics_have_expected_values() -> None:
     predictions = PredictionSet(
         dataset_name="toy",

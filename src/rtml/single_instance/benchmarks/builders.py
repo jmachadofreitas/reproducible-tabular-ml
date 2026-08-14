@@ -32,10 +32,12 @@ def build_benchmark_suite(config: Mapping[str, Any] | None) -> BenchmarkSuite:
 def build_sklearn_benchmark_suite(config: Mapping[str, Any]) -> BenchmarkSuite:
     """Build one of the bundled sklearn benchmark suites."""
     suite_name = str(config.get("suite") or "classification").lower()
+    valid_size = config.get("valid_size")
+    valid_size = None if valid_size is None else float(valid_size)
     if suite_name == "classification":
-        suite = load_sklearn_classification_suite()
+        suite = load_sklearn_classification_suite(valid_size=valid_size)
     elif suite_name == "regression":
-        suite = load_sklearn_regression_suite()
+        suite = load_sklearn_regression_suite(valid_size=valid_size)
     else:
         raise ValueError(
             "sklearn benchmark configs currently support suite='classification' "

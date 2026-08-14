@@ -99,15 +99,13 @@ def test_feature_schema_select_supports_kind_and_tag_queries() -> None:
     assert dataset.schema.tagged(FeatureTag.ZERO_INFLATED) == ["x_sparse"]
 
 
-def test_dataset_select_returns_columns_or_feature_info() -> None:
+def test_feature_schema_selected_columns_resolve_to_feature_info() -> None:
     dataset = make_tagged_dataset()
 
-    assert dataset.select(kinds=[FeatureKind.NUMERIC], include_tags=[FeatureTag.SKEWED]) == [
-        "x_num"
-    ]
-    selected = dataset.select(include_tags=[FeatureTag.ZERO_INFLATED], return_features=True)
-    assert list(selected) == ["x_sparse"]
-    assert selected["x_sparse"].kind == FeatureKind.NUMERIC
+    selected = dataset.schema.select(include_tags=[FeatureTag.ZERO_INFLATED])
+
+    assert selected == ["x_sparse"]
+    assert dataset.schema.get(selected[0]).kind == FeatureKind.NUMERIC
 
 
 def test_dataset_rejects_schema_column_mismatch() -> None:
@@ -118,12 +116,32 @@ def test_dataset_rejects_schema_column_mismatch() -> None:
         Dataset(name="bad", data=data, schema=schema)
 
 
+def test_dataset_rejects_non_string_column_names() -> None:
+    data = pd.DataFrame({0: [1, 2]})
+
+    with pytest.raises(TypeError, match="column names must be strings"):
+        Dataset(name="bad", data=data, schema=FeatureSchema.infer(data))
+
+
+@pytest.mark.parametrize("positions", [[1.5], [True, False], np.array([[0, 1]])])
+def test_dataset_rejects_non_integer_or_non_vector_positions(positions) -> None:
+    dataset = make_tagged_dataset()
+
+    with pytest.raises((TypeError, ValueError)):
+        dataset[positions]
+
+
 def test_dataset_select_rows_keeps_schema_and_metadata() -> None:
     dataset = make_dataset()
     selected = dataset.select_rows([2, 0])
 
     assert selected.data["row_id"].tolist() == ["r3", "r1"]
     assert selected.schema is dataset.schema
+
+
+def test_dataset_select_rows_rejects_non_integer_positions() -> None:
+    with pytest.raises(TypeError, match="row positions must be integers"):
+        make_dataset().select_rows([1.5])
 
 
 def test_dataset_getitem_uses_positions_and_allows_repeats() -> None:

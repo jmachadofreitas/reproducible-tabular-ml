@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     from rtml.core.benchmarks import BenchmarkCase
 
 
-@dataclass(frozen=True)
+@dataclass
 class BackendResult:
     """Backend-native output before run persistence and logging are applied."""
 

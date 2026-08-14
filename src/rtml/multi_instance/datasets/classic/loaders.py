@@ -77,7 +77,7 @@ def _build_dataset(
     task = MultiInstanceTask(
         name=parsed.relation,
         task_type=TaskType.BINARY_CLASSIFICATION,
-        instance_source=dataset.select_instance_features(kinds=[FeatureKind.NUMERIC]),
+        instance_source=dataset.instance_schema.select(kinds=[FeatureKind.NUMERIC]),
         target=parsed.target_column,
         metrics=[MetricSpec(name="accuracy", greater_is_better=True)],
         primary_metric="accuracy",

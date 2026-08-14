@@ -3,7 +3,6 @@
 import os
 from collections.abc import Mapping, Sequence
 from contextlib import nullcontext
-from dataclasses import replace
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -53,43 +52,19 @@ def _logger_run_context(
 
 
 def _with_metadata(result: RunResult, metadata: Mapping[str, Any] | None) -> RunResult:
-    if not metadata:
-        return result
-    merged = {**result.record.metadata, **dict(metadata)}
-    return replace(result, record=replace(result.record, metadata=merged))
+    if metadata:
+        result.record.metadata.update(metadata)
+    return result
 
 
-def _subgroup_columns(case: BenchmarkCase, configured_columns: Sequence[str] | None) -> list[str]:
-    if configured_columns is None:
-        return []
-    columns: list[str] = []
-    for column in configured_columns:
-        if column not in columns:
-            columns.append(column)
-    return columns
-
-
-def _subgroup_values(
-    *,
-    case: BenchmarkCase,
-    resample_id: str,
-    columns: Sequence[str] | None,
-) -> dict[str, Any]:
-    selected_columns = _subgroup_columns(case, columns)
-    if not selected_columns:
-        return {}
-    test_idx = case.resampling.get_resample(resample_id).test_idx
-    return case.dataset.subgroup_values(selected_columns, test_idx)
-
-
-def build_run_id(
+def build_run_key(
     *,
     case_name: str,
     resample_id: str,
     method_name: str,
     seed: int,
 ) -> str:
-    """Build a readable id for one execution-plan unit."""
+    """Build the repeatable key for one case/method/resample/seed combination."""
     return f"{case_name}:{method_name}:{resample_id}:seed-{seed}"
 
 
@@ -114,7 +89,7 @@ def build_run_record(
 
     resample_id = backend_result.predictions.resample_id
     return RunRecord(
-        run_id=build_run_id(
+        run_key=build_run_key(
             case_name=case.name,
             resample_id=resample_id,
             method_name=method.name,
@@ -150,7 +125,7 @@ def build_failed_run_record(
 ) -> RunRecord:
     error_message = str(error) or repr(error)
     return RunRecord(
-        run_id=build_run_id(
+        run_key=build_run_key(
             case_name=case.name,
             resample_id=resample_id,
             method_name=method.name,
@@ -184,7 +159,6 @@ def _run_method_in_context(
     artifact_dir: str | Path | None = None,
     logger: Logger | None = None,
     metadata: Mapping[str, Any] | None = None,
-    subgroup_columns: Sequence[str] | None = None,
 ) -> RunResult:
     _validate_method_backend(method, backend)
 
@@ -209,20 +183,9 @@ def _run_method_in_context(
         RunResult(predictions=backend_result.predictions, record=record),
         metadata,
     )
-    enriched_predictions = replace(
-        backend_result.predictions,
-        subgroups={
-            **dict(backend_result.predictions.subgroups or {}),
-            **_subgroup_values(
-                case=case,
-                resample_id=result.record.resample_id,
-                columns=subgroup_columns,
-            ),
-        },
-    )
     result = save_run_artifacts(
         case=case,
-        result=replace(result, predictions=enriched_predictions),
+        result=result,
         artifact_dir=artifact_dir,
     )
     if logger is not None:
@@ -241,7 +204,6 @@ def run_method(
     artifact_dir: str | Path | None = None,
     logger: Logger | None = None,
     metadata: Mapping[str, Any] | None = None,
-    subgroup_columns: Sequence[str] | None = None,
 ) -> RunResult:
     """Execute one complete method on one benchmark case/resample."""
     planned_resample_id = case.resampling.get_resample(resample_id).id
@@ -275,7 +237,6 @@ def run_method(
                 **method.metadata,
                 **dict(metadata or {}),
             },
-            subgroup_columns=subgroup_columns,
         )
 
 
@@ -293,7 +254,6 @@ class RunExecutor(Protocol):
         logger: Logger | None = None,
         continue_on_error: bool = False,
         show_progress: bool = False,
-        subgroup_columns: Sequence[str] | None = None,
     ) -> list[RunResult]:
         """Run every `RunSpec` in the plan and return RTML-native results."""
         ...
@@ -320,7 +280,6 @@ def _execute_run_spec(
     continue_on_error: bool,
     logger: Logger | None = None,
     metadata: Mapping[str, Any] | None = None,
-    subgroup_columns: Sequence[str] | None = None,
 ) -> RunResult:
     with _logger_run_context(
         logger,
@@ -344,7 +303,6 @@ def _execute_run_spec(
                 artifact_dir=artifact_dir,
                 logger=logger,
                 metadata=metadata,
-                subgroup_columns=subgroup_columns,
             )
         except Exception as exc:
             if not continue_on_error:
@@ -389,7 +347,6 @@ class SequentialExecutor:
         logger: Logger | None = None,
         continue_on_error: bool = False,
         show_progress: bool = False,
-        subgroup_columns: Sequence[str] | None = None,
     ) -> list[RunResult]:
         prepare_execution_artifacts(plan, artifact_dir)
         backend_by_name = _backend_by_name(backends)
@@ -413,7 +370,6 @@ class SequentialExecutor:
                         **run_spec.method.metadata,
                         **plan.metadata,
                     },
-                    subgroup_columns=subgroup_columns,
                 )
             )
         return results
@@ -448,7 +404,6 @@ class RayExecutor:
         logger: Logger | None = None,
         continue_on_error: bool = False,
         show_progress: bool = False,
-        subgroup_columns: Sequence[str] | None = None,
     ) -> list[RunResult]:
         prepare_execution_artifacts(plan, artifact_dir)
         try:
@@ -489,7 +444,6 @@ class RayExecutor:
                         **run_spec.method.metadata,
                         **plan.metadata,
                     },
-                    subgroup_columns,
                 )
             )
 
@@ -574,7 +528,6 @@ class RayExecutor:
         continue_on_error: bool,
         worker_logger_config: Mapping[str, Any],
         metadata: Mapping[str, Any],
-        subgroup_columns: Sequence[str] | None,
     ) -> RunResult:
         worker_logger = RayExecutor._build_worker_logger(worker_logger_config)
         return _execute_run_spec(
@@ -590,7 +543,6 @@ class RayExecutor:
             continue_on_error=continue_on_error,
             logger=worker_logger,
             metadata=metadata,
-            subgroup_columns=subgroup_columns,
         )
 
     @staticmethod
@@ -651,7 +603,6 @@ def run_suite(
     metadata: Mapping[str, Any] | None = None,
     continue_on_error: bool = False,
     show_progress: bool = False,
-    subgroup_columns: Sequence[str] | None = None,
 ) -> list[RunResult]:
     """Execute a suite by wrapping it in a default comparison study."""
     study = Study.from_suite(
@@ -671,7 +622,6 @@ def run_suite(
         metadata=metadata,
         continue_on_error=continue_on_error,
         show_progress=show_progress,
-        subgroup_columns=subgroup_columns,
     )
 
 
@@ -688,7 +638,6 @@ def run_study(
     metadata: Mapping[str, Any] | None = None,
     continue_on_error: bool = False,
     show_progress: bool = False,
-    subgroup_columns: Sequence[str] | None = None,
 ) -> list[RunResult]:
     """Expand a study into an execution plan and execute it."""
     plan = ExecutionPlan.from_study(
@@ -705,5 +654,4 @@ def run_study(
         logger=logger,
         continue_on_error=continue_on_error,
         show_progress=show_progress,
-        subgroup_columns=subgroup_columns,
     )

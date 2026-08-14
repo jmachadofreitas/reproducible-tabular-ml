@@ -101,10 +101,7 @@ class MultiInstanceTorchBackend(MethodBackend):
         model_builder = self._model_builder_for(method)
         resample = case.resampling.get_resample(resample_id)
         device = resolve_device(runtime)
-        generator = seed_torch(
-            seed,
-            deterministic=None if runtime is None else runtime.deterministic,
-        )
+        generator = seed_torch(seed)
         fit_config = TorchFitConfig.from_mapping(method.fit)
         self._validate_fit_config(fit_config, resample)
         transform_options, policy = self._preprocessing_config(method)
@@ -136,6 +133,7 @@ class MultiInstanceTorchBackend(MethodBackend):
             score_name=score_metric.name,
             score_mode=score_mode,
             device=device,
+            deterministic=None if runtime is None else runtime.deterministic,
             logger=logger,
             checkpoint_manager=self._build_checkpoint_manager(
                 case=case,
@@ -192,8 +190,6 @@ class MultiInstanceTorchBackend(MethodBackend):
     @staticmethod
     def _validate_fit_config(fit_config: TorchFitConfig, resample: Resample) -> None:
         has_validation = resample.valid_idx is not None
-        if fit_config.validation_fraction:
-            raise ValueError("multi-instance validation must be materialized in resample.valid_idx")
         if fit_config.early_stopping_patience is not None and not has_validation:
             raise ValueError("early stopping requires saved resample.valid_idx")
         checkpoint = fit_config.checkpoint
@@ -311,8 +307,15 @@ class MultiInstanceTorchBackend(MethodBackend):
     ) -> CheckpointManager | None:
         config = dict(bundle.fit_config.checkpoint)
         config.setdefault("save_best", resample.valid_idx is not None)
+        checkpoint_root = config.pop("dir", None)
+        resume_from = config.get("resume_from")
+        if checkpoint_root is None:
+            if not config.get("enabled", bool(resume_from)):
+                return None
+            raise ValueError("checkpoint.dir is required when checkpointing is enabled")
+        config.setdefault("require_empty", resume_from in {None, "", False})
         directory = checkpoint_directory(
-            config.pop("dir", ".runs/checkpoints"),
+            checkpoint_root,
             case_name=case.name,
             method_name=method.name,
             resample_id=resample.id,
@@ -360,14 +363,12 @@ class MultiInstanceTorchBackend(MethodBackend):
             "batch_size": bundle.fit_config.batch_size,
             **dict(bundle.metadata),
         }
-        if bundle.fit_config.tracking.get("store_history", False):
-            metadata["train_history"] = trainer.train_history
-            metadata["validation_history"] = trainer.validation_history
-            metadata["test_history"] = trainer.test_history
         if trainer.last_checkpoint_path is not None:
             metadata["last_checkpoint_path"] = trainer.last_checkpoint_path
         if trainer.best_checkpoint_path is not None:
             metadata["best_checkpoint_path"] = trainer.best_checkpoint_path
         if trainer.resume_checkpoint_path is not None:
             metadata["resume_checkpoint_path"] = trainer.resume_checkpoint_path
+        if trainer.best_epoch is not None:
+            metadata["selected_epoch"] = trainer.best_epoch
         return metadata

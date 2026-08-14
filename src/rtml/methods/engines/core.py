@@ -1,4 +1,5 @@
 from collections.abc import Callable, Mapping
+from copy import deepcopy
 from typing import Any
 
 import numpy as np
@@ -19,13 +20,11 @@ TrainingStep = Callable[[Batch], StepOutput]
 EvaluationStep = Callable[[Batch], Mapping[str, Any] | None]
 
 
-def seed_torch(seed: int, *, deterministic: bool | None = None) -> torch.Generator:
+def seed_torch(seed: int) -> torch.Generator:
     np.random.seed(seed)
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
-    if deterministic is not None:
-        torch.use_deterministic_algorithms(deterministic, warn_only=True)
     generator = torch.Generator()
     generator.manual_seed(seed)
     return generator
@@ -135,6 +134,7 @@ class Trainer(Engine):
         train_metrics: RunningMetrics | None = None,
         lr_scheduler: Any | None = None,
         hp_scheduler: Any | None = None,
+        model: torch.nn.Module | None = None,
         val_evaluator: Evaluator | None = None,
         test_evaluator: Evaluator | None = None,
         score_name: str | None = None,
@@ -151,6 +151,7 @@ class Trainer(Engine):
         self.train_metrics = train_metrics or RunningMetrics()
         self.lr_scheduler = lr_scheduler
         self.hp_scheduler = hp_scheduler
+        self.model = model
         self.val_evaluator = val_evaluator
         self.test_evaluator = test_evaluator
         self.score_name = score_name
@@ -162,16 +163,16 @@ class Trainer(Engine):
         self.early_stopping_patience = early_stopping_patience
         self.run_logger = logger
         self.checkpoint_manager = checkpoint_manager
-        self.train_history: list[dict[str, Any]] = []
-        self.validation_history: list[dict[str, Any]] = []
-        self.test_history: list[dict[str, Any]] = []
         self.latest_train_metrics: dict[str, Any] = {}
         self.latest_validation_metrics: dict[str, Any] = {}
         self.latest_test_metrics: dict[str, Any] = {}
-        self.checkpoint_paths: list[str] = []
         self.best_checkpoint_path: str | None = None
         self.last_checkpoint_path: str | None = None
         self.resume_checkpoint_path: str | None = None
+        self.best_epoch: int | None = None
+        self._best_validation_score: float | None = None
+        self._best_model_state: dict[str, Any] | None = None
+        self._latest_validation_epoch: int | None = None
         self._val_dataloader: DataLoader | None = None
         self._test_dataloader: DataLoader | None = None
 
@@ -240,8 +241,13 @@ class Trainer(Engine):
         self.hp_scheduler.step()
 
     def _reset_train_metrics(self, engine: Engine) -> None:
-        self.train_history = []
         self.latest_train_metrics = {}
+        self.latest_validation_metrics = {}
+        self.latest_test_metrics = {}
+        self.best_epoch = None
+        self._best_validation_score = None
+        self._best_model_state = None
+        self._latest_validation_epoch = None
         self.train_metrics.reset()
 
     def _update_train_metrics(self, engine: Engine) -> None:
@@ -250,7 +256,6 @@ class Trainer(Engine):
     def _complete_train_epoch(self, engine: Engine) -> None:
         metrics = self.train_metrics.compute()
         self.latest_train_metrics = metrics
-        self.train_history.append(metrics)
         self._log_metrics("train", metrics, step=engine.state.epoch)
         self.train_metrics.reset()
 
@@ -259,8 +264,10 @@ class Trainer(Engine):
             return
         _, metrics = self.val_evaluator.evaluate(self._val_dataloader)
         self.latest_validation_metrics = metrics
-        self.validation_history.append(metrics)
+        self._latest_validation_epoch = int(engine.state.epoch)
+        self._remember_best_model()
         self._log_metrics("validation", metrics, step=engine.state.epoch)
+        self._save_best_checkpoint(engine)
 
         self._run_test(engine)
 
@@ -269,7 +276,6 @@ class Trainer(Engine):
             return
         _, test_metrics = self.test_evaluator.evaluate(self._test_dataloader)
         self.latest_test_metrics = test_metrics
-        self.test_history.append(test_metrics)
         self._log_metrics("test", test_metrics, step=engine.state.epoch)
 
     def _log_metrics(self, prefix: str, metrics: Mapping[str, Any], *, step: int) -> None:
@@ -284,31 +290,69 @@ class Trainer(Engine):
         if self.checkpoint_manager is None:
             return
         epoch = int(engine.state.epoch)
-        if not self.checkpoint_manager.should_save(epoch):
+        if not self.checkpoint_manager.should_save_last(epoch):
             return
-        score = self._checkpoint_score()
-        last_path, best_path = self.checkpoint_manager.save(
+        last_path = self.checkpoint_manager.save_last_checkpoint(
             engine=engine,
             epoch=epoch,
             step=int(engine.state.iteration),
             score_name=self.score_name,
+            score=self._checkpoint_score(),
+        )
+        if last_path is not None:
+            self._log_artifact(str(last_path), artifact_path="checkpoints")
+            self.last_checkpoint_path = str(last_path)
+
+    def _save_best_checkpoint(self, engine: Engine) -> None:
+        if self.checkpoint_manager is None or self.score_name is None:
+            return
+        score = self._checkpoint_score()
+        if score is None:
+            return
+        best_path = self.checkpoint_manager.save_best_checkpoint(
+            engine=engine,
+            epoch=int(engine.state.epoch),
+            step=int(engine.state.iteration),
+            score_name=self.score_name,
             score=score,
         )
-        for path in (last_path, best_path):
-            if path is not None:
-                self.checkpoint_paths.append(str(path))
-                self._log_artifact(str(path), artifact_path="checkpoints")
-        if last_path is not None:
-            self.last_checkpoint_path = str(last_path)
         if best_path is not None:
+            self._log_artifact(str(best_path), artifact_path="checkpoints")
             self.best_checkpoint_path = str(best_path)
 
     def _checkpoint_score(self) -> float | None:
         if self.score_name is None:
             return None
+        if self._latest_validation_epoch != int(self.state.epoch):
+            return None
         if self.score_name in self.latest_validation_metrics:
             return float(self.latest_validation_metrics[self.score_name])
         return None
+
+    def _remember_best_model(self) -> None:
+        if self.model is None or self.score_name is None:
+            return
+        value = self.latest_validation_metrics.get(self.score_name)
+        if value is None:
+            return
+        score = float(value)
+        is_better = self._best_validation_score is None or (
+            score > self._best_validation_score
+            if self.score_mode == "max"
+            else score < self._best_validation_score
+        )
+        if not is_better:
+            return
+        self._best_validation_score = score
+        self.best_epoch = int(self.state.epoch)
+        self._best_model_state = deepcopy(self.model.state_dict())
+
+    def restore_best_model(self) -> bool:
+        """Restore the model selected by validation during this training run."""
+        if self.model is None or self._best_model_state is None:
+            return False
+        self.model.load_state_dict(self._best_model_state)
+        return True
 
     def _log_artifact(self, path: str, *, artifact_path: str | None = None) -> None:
         if self.run_logger is None:

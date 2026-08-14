@@ -65,6 +65,8 @@ def make_ensemble_train_evaluation_output_formatter(
                 "labels": labels,
                 "y": target.long(),
                 "accuracy": (labels.reshape(-1), target.reshape(-1)),
+                "roc_auc": (probabilities.reshape(-1), target.reshape(-1)),
+                "log_loss": (scores, target.float()),
             }
 
         return format_binary
@@ -81,6 +83,8 @@ def make_ensemble_train_evaluation_output_formatter(
                 "labels": labels,
                 "y": target,
                 "accuracy": (labels, target),
+                "roc_auc": (probabilities, target),
+                "log_loss": (scores, target),
             }
 
         return format_multiclass

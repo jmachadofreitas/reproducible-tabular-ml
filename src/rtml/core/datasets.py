@@ -1,7 +1,7 @@
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Literal, overload
+from typing import Any, cast, overload
 
 import numpy as np
 import pandas as pd
@@ -220,7 +220,11 @@ class Dataset:
             duplicates = self.data.columns[self.data.columns.duplicated()].tolist()
             raise ValueError(f"data contains duplicate columns: {duplicates}")
 
-        data_columns = [str(column) for column in self.data.columns]
+        non_string_columns = [column for column in self.data.columns if not isinstance(column, str)]
+        if non_string_columns:
+            raise TypeError(f"dataset column names must be strings: {non_string_columns}")
+
+        data_columns = list(self.data.columns)
         schema_columns = self.schema.names
         missing_from_schema = [column for column in data_columns if column not in self.schema]
         extra_in_schema = [column for column in schema_columns if column not in data_columns]
@@ -239,7 +243,7 @@ class Dataset:
             if self.data[self.row_id].duplicated().any():
                 raise ValueError(f"row_id column {self.row_id!r} contains duplicate values")
 
-        self._column_set = {str(column) for column in self.data.columns}
+        self._column_set = set(self.data.columns)
 
     def __len__(self) -> int:
         return len(self.data)
@@ -258,7 +262,18 @@ class Dataset:
         rows: int | np.integer[Any] | Sequence[int] | np.ndarray | slice,
     ) -> pd.Series | pd.DataFrame:
         """Select one or more rows by position."""
-        return self.data.iloc[rows]  # FIX
+        if isinstance(rows, (int, np.integer)):
+            if isinstance(rows, (bool, np.bool_)):
+                raise TypeError("row position must be an integer, not a boolean")
+            return self.data.iloc[int(rows)]
+        if isinstance(rows, slice):
+            return self.data.iloc[rows]
+        positions = np.asarray(rows)
+        if positions.ndim != 1:
+            raise ValueError("row positions must be one-dimensional")
+        if positions.size and positions.dtype.kind not in {"i", "u"}:
+            raise TypeError("row positions must be integers")
+        return self.data.iloc[positions.astype(int, copy=False)]
 
     @property
     def columns(self) -> set[str]:
@@ -291,11 +306,7 @@ class Dataset:
         }
 
     def select_rows(self, rows: Sequence[int] | np.ndarray | slice) -> Dataset:
-        if isinstance(rows, slice):
-            positions = list(range(len(self)))[rows]
-        else:
-            positions = [int(position) for position in rows]
-        selected = self.data.iloc[positions]
+        selected = cast(pd.DataFrame, self[rows])
         return Dataset(
             name=self.name,
             data=selected,
@@ -303,54 +314,3 @@ class Dataset:
             row_id=self.row_id,
             metadata=self.metadata,
         )
-
-    @overload
-    def select(
-        self,
-        *,
-        kinds: Iterable[FeatureKind | str] | None = None,
-        include_tags: Iterable[FeatureTagLike] = (),
-        exclude_tags: Iterable[FeatureTagLike] = (),
-        require_all_tags: bool = True,
-        return_features: Literal[False] = False,
-    ) -> list[str]: ...
-
-    @overload
-    def select(
-        self,
-        *,
-        kinds: Iterable[FeatureKind | str] | None = None,
-        include_tags: Iterable[FeatureTagLike] = (),
-        exclude_tags: Iterable[FeatureTagLike] = (),
-        require_all_tags: bool = True,
-        return_features: Literal[True],
-    ) -> dict[str, FeatureInfo]: ...
-
-    def select(
-        self,
-        *,
-        kinds: Iterable[FeatureKind | str] | None = None,
-        include_tags: Iterable[FeatureTagLike] = (),
-        exclude_tags: Iterable[FeatureTagLike] = (),
-        require_all_tags: bool = True,
-        return_features: bool = False,
-    ) -> list[str] | dict[str, FeatureInfo]:
-        """Select dataset features by semantic kind and/or tags.
-
-        By default, returns column names suitable for preprocessing pipelines or method input.
-
-        If ``return_features=True``, returns the matching ``FeatureInfo`` objects
-        keyed by column name, allowing preprocessing policies to inspect dtype,
-        tags, and metadata.
-        """
-        columns = self.schema.select(
-            kinds=kinds,
-            include_tags=include_tags,
-            exclude_tags=exclude_tags,
-            require_all_tags=require_all_tags,
-        )
-
-        if return_features:
-            return {column: self.schema.get(column) for column in columns}
-
-        return columns
