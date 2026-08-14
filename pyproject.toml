@@ -5,6 +5,8 @@ description = "Reproducible benchmarking for tabular ML methods"
 requires-python = ">=3.14"
 license = { file = "LICENSE" }
 dependencies = [
+    "pandas",
+    "tabulate",
     "torch",
     "pytorch-ignite",
     "tabm==0.0.3",
