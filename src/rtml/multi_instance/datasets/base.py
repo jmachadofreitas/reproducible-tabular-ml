@@ -115,20 +115,6 @@ class MultiInstanceDataset:
             return self.bag_table.iloc[positions][self.bag_id_column].to_numpy()
         return np.asarray(indices)
 
-    def subgroup_values(
-        self,
-        columns: Iterable[str],
-        indices: Sequence[int] | IndexArray,
-    ) -> dict[str, np.ndarray]:
-        """Return bag-level subgroup columns aligned with selected bags."""
-        selected_columns = list(columns)
-        self.require_bag_columns(selected_columns)
-        data = self.bag_table.iloc[list(indices)]
-        return {
-            column: data[column].astype("string").fillna("<NA>").to_numpy(dtype=str)
-            for column in selected_columns
-        }
-
     def require_bag_columns(self, columns: Iterable[str]) -> None:
         missing = [column for column in columns if column not in self._bag_columns]
         if missing:

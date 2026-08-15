@@ -291,20 +291,6 @@ class Dataset:
             return self.data.iloc[list(indices)][self.row_id].to_numpy()
         return np.asarray(indices)
 
-    def subgroup_values(
-        self,
-        columns: Iterable[str],
-        indices: Sequence[int] | np.ndarray,
-    ) -> dict[str, np.ndarray]:
-        """Return subgroup columns aligned with selected samples."""
-        selected_columns = list(columns)
-        self.require_columns(selected_columns)
-        data = self.data.iloc[list(indices)]
-        return {
-            column: data[column].astype("string").fillna("<NA>").to_numpy(dtype=str)
-            for column in selected_columns
-        }
-
     def select_rows(self, rows: Sequence[int] | np.ndarray | slice) -> Dataset:
         selected = cast(pd.DataFrame, self[rows])
         return Dataset(

@@ -85,7 +85,6 @@ def build_bag_feature_dataset(
             source=source,
             target=task.target,
             groups=task.groups,
-            sensitive_attributes=task.sensitive_attributes,
             metrics=task.metrics,
             primary_metric=task.primary_metric,
             metadata={

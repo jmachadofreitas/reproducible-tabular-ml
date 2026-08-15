@@ -103,7 +103,6 @@ def test_multi_instance_dataset_uses_offsets_for_bag_storage() -> None:
 def test_multi_instance_dataset_supports_bag_subgroups() -> None:
     dataset = make_grouped_mil_dataset()
 
-    assert dataset.subgroup_values(["site"], [1, 4])["site"].tolist() == ["b", "a"]
 
 
 def test_multi_instance_dataset_rejects_bad_offsets() -> None:

@@ -38,7 +38,6 @@ class TaskSpec:
     # Auxiliary
     sample_weight: str | None = None
     groups: list[str] = field(default_factory=list)
-    sensitive_attributes: list[str] = field(default_factory=list)
 
     # Metrics
     metrics: list[MetricSpec] = field(default_factory=list)
@@ -54,7 +53,6 @@ class TaskSpec:
         self.source = list(self.source)
         self.metrics = list(self.metrics)
         self.groups = list(self.groups)
-        self.sensitive_attributes = list(self.sensitive_attributes)
         self.metadata = dict(self.metadata or {})
 
         if not self.source and self.task_type != TaskType.UNSUPERVISED:
@@ -78,7 +76,6 @@ class TaskSpec:
                 self.target,
                 self.sample_weight,
                 *self.groups,
-                *self.sensitive_attributes,
             )
             if column is not None
         ]
@@ -96,7 +93,6 @@ class TaskSpec:
         if self.sample_weight is not None:
             columns.append(self.sample_weight)
         columns.extend(self.groups)
-        columns.extend(self.sensitive_attributes)
         return columns
 
     def validate_columns(self, dataset: Dataset) -> None:
