@@ -19,7 +19,7 @@ DEFAULT_ENVIRONMENT_PACKAGES = (
 )
 
 
-@dataclass(frozen=True)
+@dataclass
 class RuntimeSpec:
     """Backend-facing hints that may change how a method executes.
 

@@ -160,6 +160,9 @@ class FeatureSchema:
         weight_columns: Iterable[str] = (),
         unknown_columns: Iterable[str] = (),
     ) -> FeatureSchema:
+        non_string_columns = [column for column in data.columns if not isinstance(column, str)]
+        if non_string_columns:
+            raise TypeError("dataframe column names must be strings")
         id_set = set(id_columns)
         categorical_set = set(categorical_columns)
         binary_set = set(binary_columns)
@@ -168,9 +171,8 @@ class FeatureSchema:
         unknown_set = set(unknown_columns)
         features: dict[str, FeatureInfo] = {}
 
-        for raw_column in data.columns:
-            column = str(raw_column)
-            series = data[raw_column]
+        for column in data.columns:
+            series = data[column]
             if column in id_set:
                 kind = FeatureKind.ID
             elif column in group_set:
@@ -204,8 +206,6 @@ class Dataset:
     schema: FeatureSchema
     row_id: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
-
-    _column_set: set[str] = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         if not self.name:
@@ -243,8 +243,6 @@ class Dataset:
             if self.data[self.row_id].duplicated().any():
                 raise ValueError(f"row_id column {self.row_id!r} contains duplicate values")
 
-        self._column_set = set(self.data.columns)
-
     def __len__(self) -> int:
         return len(self.data)
 
@@ -277,11 +275,12 @@ class Dataset:
 
     @property
     def columns(self) -> set[str]:
-        return self._column_set
+        return set(self.data.columns)
 
     def require_columns(self, columns: Iterable[str]) -> None:
         """Ensure that the requested columns exist in the dataset."""
-        missing = [column for column in columns if column not in self._column_set]
+        available = set(self.data.columns)
+        missing = [column for column in columns if column not in available]
         if missing:
             raise ValueError(f"columns not present in dataset {self.name!r}: {missing}")
 

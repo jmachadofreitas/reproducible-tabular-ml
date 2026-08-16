@@ -39,9 +39,6 @@ class MultiInstanceDataset:
     instance_id_column: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
-    _bag_columns: set[str] = field(init=False, repr=False)
-    _instance_columns: set[str] = field(init=False, repr=False)
-
     def __post_init__(self) -> None:
         if not self.name:
             raise ValueError("dataset name must be non-empty")
@@ -68,8 +65,6 @@ class MultiInstanceDataset:
         )
         self._validate_bag_offsets()
 
-        self._bag_columns = set(self.bag_table.columns)
-        self._instance_columns = set(self.instance_table.columns)
         self._validate_ids()
 
     def __len__(self) -> int:
@@ -92,11 +87,11 @@ class MultiInstanceDataset:
 
     @property
     def bag_columns(self) -> set[str]:
-        return self._bag_columns
+        return set(self.bag_table.columns)
 
     @property
     def instance_columns(self) -> set[str]:
-        return self._instance_columns
+        return set(self.instance_table.columns)
 
     def bag_size(self, bag_position: int) -> int:
         self._require_bag_position(bag_position)
@@ -116,12 +111,14 @@ class MultiInstanceDataset:
         return np.asarray(indices)
 
     def require_bag_columns(self, columns: Iterable[str]) -> None:
-        missing = [column for column in columns if column not in self._bag_columns]
+        available = set(self.bag_table.columns)
+        missing = [column for column in columns if column not in available]
         if missing:
             raise ValueError(f"bag columns not present in dataset {self.name!r}: {missing}")
 
     def require_instance_columns(self, columns: Iterable[str]) -> None:
-        missing = [column for column in columns if column not in self._instance_columns]
+        available = set(self.instance_table.columns)
+        missing = [column for column in columns if column not in available]
         if missing:
             raise ValueError(f"instance columns not present in dataset {self.name!r}: {missing}")
 

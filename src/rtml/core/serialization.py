@@ -36,5 +36,5 @@ class JSONEncoder(json.JSONEncoder):
         if isinstance(value, ListConfig | DictConfig):
             return OmegaConf.to_object(value)
         if isinstance(value, set | frozenset):
-            return sorted(value)
+            return sorted(value, key=lambda item: (type(item).__name__, repr(item)))
         return super().default(value)

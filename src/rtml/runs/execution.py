@@ -574,13 +574,14 @@ class RayExecutor:
             return results
 
         results_by_position: list[RunResult | None] = [None] * len(refs)
+        position_by_ref = {ref: position for position, ref in enumerate(refs)}
         pending = list(refs)
         with tqdm(total=len(refs), desc=label, unit="run") as progress:
             while pending:
                 ready, pending = ray.wait(pending, num_returns=1)
                 ready_results = ray.get(ready)
                 for ref, result in zip(ready, ready_results, strict=True):
-                    results_by_position[refs.index(ref)] = result
+                    results_by_position[position_by_ref[ref]] = result
                 progress.update(len(ready))
 
         if any(result is None for result in results_by_position):
@@ -605,7 +606,7 @@ def run_suite(
     show_progress: bool = False,
 ) -> list[RunResult]:
     """Execute a suite by wrapping it in a default comparison study."""
-    study = Study.from_suite(
+    study = Study(
         name=plan_name or suite.name,
         suite=suite,
         methods=list(methods),

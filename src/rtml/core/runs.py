@@ -26,6 +26,9 @@ class ExecutionResources:
     memory: int | None = None
     custom: dict[str, float] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        self.custom = dict(self.custom or {})
+
 
 @dataclass
 class RunSpec:
@@ -48,6 +51,8 @@ class ExecutionPlan:
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        self.runs = tuple(self.runs)
+        self.metadata = dict(self.metadata or {})
         run_keys = [
             (run.case.name, run.method.name, run.resample_id, run.seed) for run in self.runs
         ]
