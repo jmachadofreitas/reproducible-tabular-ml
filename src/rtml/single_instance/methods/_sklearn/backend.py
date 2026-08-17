@@ -37,6 +37,12 @@ SUPPORTED_SKLEARN_MODEL_KINDS = {
     "random_forest",
     "ridge",
 }
+TREE_MODEL_KINDS = {"boosted_trees", "gradient_boosting", "random_forest"}
+
+
+def default_preprocessing_policy(model_kind: str) -> str:
+    """Return the built-in preprocessing policy for one sklearn model family."""
+    return "tree_default" if model_kind in TREE_MODEL_KINDS else "linear_default"
 
 
 def build_sklearn_estimator(
@@ -110,7 +116,10 @@ def build_sklearn_pipeline(
         raise ValueError(f"cannot build sklearn pipeline for backend {method.model.backend!r}")
 
     transform_config = dict(method.transform)
-    policy = transform_config.pop("policy", "linear_default")
+    policy = transform_config.pop(
+        "policy",
+        default_preprocessing_policy(method.model.kind),
+    )
     preprocessor = build_preprocessor(
         dataset=dataset,
         task=task,
@@ -194,8 +203,6 @@ class SklearnBackend(MethodBackend):
     ) -> BackendResult:
         self.validate_method(method)
         case.task.validate_columns(case.dataset)
-        if case.task.sample_weight is not None:
-            raise ValueError("sklearn backend does not support sample-weighted tasks")
         resample = case.resampling.get_resample(resample_id)
 
         pipeline = build_sklearn_pipeline(
@@ -219,7 +226,12 @@ class SklearnBackend(MethodBackend):
         y_train = training_data.loc[:, case.task.target]
 
         fit_start = perf_counter()
-        pipeline.fit(x_train, y_train)
+        fit_params = {}
+        if case.task.sample_weight is not None:
+            fit_params["model__sample_weight"] = training_data.loc[
+                :, case.task.sample_weight
+            ].to_numpy()
+        pipeline.fit(x_train, y_train, **fit_params)
         fit_time = perf_counter() - fit_start
 
         predict_start = perf_counter()
@@ -237,7 +249,12 @@ class SklearnBackend(MethodBackend):
             metrics=metrics,
             fit_time=fit_time,
             predict_time=predict_time,
-            metadata={"preprocessing_policy": method.transform.get("policy", "linear_default")},
+            metadata={
+                "preprocessing_policy": method.transform.get(
+                    "policy",
+                    default_preprocessing_policy(method.model.kind),
+                )
+            },
         )
 
     def refit(
@@ -256,8 +273,6 @@ class SklearnBackend(MethodBackend):
             raise TypeError("sklearn refit requires a single-instance Dataset and TaskSpec")
         self.validate_method(method)
         task.validate_columns(dataset)
-        if task.sample_weight is not None:
-            raise ValueError("sklearn refit does not support sample-weighted tasks")
         x = task.source_frame(dataset)
         y = task.target_series(dataset)
         if y is None:
@@ -273,7 +288,10 @@ class SklearnBackend(MethodBackend):
             runtime=runtime,
         )
         fit_start = perf_counter()
-        pipeline.fit(x, y)
+        fit_params = {}
+        if task.sample_weight is not None:
+            fit_params["model__sample_weight"] = dataset.data.loc[:, task.sample_weight].to_numpy()
+        pipeline.fit(x, y, **fit_params)
         fit_time = perf_counter() - fit_start
 
         artifact_path = artifact_dir / "method.joblib"
@@ -285,7 +303,12 @@ class SklearnBackend(MethodBackend):
             training_size=len(x),
             input_schema={name: dataset.schema.get(name) for name in task.source},
             fit_time=fit_time,
-            metadata={"preprocessing_policy": method.transform.get("policy", "linear_default")},
+            metadata={
+                "preprocessing_policy": method.transform.get(
+                    "policy",
+                    default_preprocessing_policy(method.model.kind),
+                )
+            },
         )
 
     def load_refit(

@@ -18,6 +18,32 @@ from rtml.core.tasks import TaskSpec
 
 PreprocessorBuilder = Callable[[Dataset, TaskSpec, Mapping[str, Any]], ColumnTransformer]
 
+_LINEAR_POLICY_OPTIONS = {
+    "categorical_impute",
+    "high_cardinality_max_categories",
+    "high_cardinality_min_frequency",
+    "numeric_impute",
+    "skewed_numeric_transform",
+}
+_TREE_POLICY_OPTIONS = {
+    "categorical_impute",
+    "high_cardinality_max_categories",
+    "high_cardinality_min_frequency",
+    "numeric_impute",
+}
+
+
+def _validate_policy_options(
+    policy: str,
+    options: Mapping[str, Any],
+    allowed: set[str],
+) -> None:
+    unknown = sorted(set(options) - allowed)
+    if unknown:
+        raise ValueError(
+            f"unknown options for preprocessing policy {policy!r}: {', '.join(unknown)}"
+        )
+
 
 def _task_source_columns(
     dataset: Dataset,
@@ -171,7 +197,7 @@ def _add_pipeline(
         transformers.append((name, pipeline, columns))
 
 
-def build_linear_default_policy(
+def _build_linear_policy(
     dataset: Dataset,
     task: TaskSpec,
     options: Mapping[str, Any],
@@ -316,11 +342,21 @@ def build_linear_default_policy(
     )
 
 
+def build_linear_default_policy(
+    dataset: Dataset,
+    task: TaskSpec,
+    options: Mapping[str, Any],
+) -> ColumnTransformer:
+    _validate_policy_options("linear_default", options, _LINEAR_POLICY_OPTIONS)
+    return _build_linear_policy(dataset, task, options)
+
+
 def build_tree_default_policy(
     dataset: Dataset,
     task: TaskSpec,
     options: Mapping[str, Any],
 ) -> ColumnTransformer:
+    _validate_policy_options("tree_default", options, _TREE_POLICY_OPTIONS)
     _validate_supported_source_columns(dataset, task)
     _validate_missing_value_tags(dataset, task)
     numeric_columns = _task_source_columns(
@@ -409,7 +445,8 @@ def build_neural_default_policy(
     task: TaskSpec,
     options: Mapping[str, Any],
 ) -> ColumnTransformer:
-    return build_linear_default_policy(dataset, task, options)
+    _validate_policy_options("neural_default", options, _LINEAR_POLICY_OPTIONS)
+    return _build_linear_policy(dataset, task, options)
 
 
 PREPROCESSING_POLICIES: dict[str, PreprocessorBuilder] = {
@@ -435,4 +472,5 @@ def build_preprocessor(
     options: Mapping[str, Any] | None = None,
 ) -> ColumnTransformer:
     builder = get_preprocessing_policy(policy)
-    return builder(dataset, task, dict(options or {}))
+    resolved_options = dict(options or {})
+    return builder(dataset, task, resolved_options)
