@@ -184,6 +184,14 @@ class MultiInstanceSklearnBackend(MethodBackend):
     ) -> BackendResult:
         if task.task_type != TaskType.BINARY_CLASSIFICATION:
             raise ValueError("binary_mi_svm requires a binary classification task")
+        unsupported_metrics = sorted(
+            {metric.name for metric in task.metrics} - {"accuracy", "roc_auc"}
+        )
+        if unsupported_metrics:
+            raise ValueError(
+                "binary_mi_svm supports accuracy and roc_auc metrics only; "
+                f"unsupported metrics: {unsupported_metrics}"
+            )
         resample = case.resampling.get_resample(resample_id)
         training_indices = resample.train_idx
         if resample.valid_idx is not None:
