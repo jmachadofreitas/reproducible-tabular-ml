@@ -1,48 +1,67 @@
 import math
-from typing import Any, Mapping
+from collections.abc import Mapping, MutableMapping
+from typing import Any, Callable
+
+ApplyHParams = Callable[[Mapping[str, Any]], None]
 
 
 class HPScheduler:
-    def __init__(self, hparams_dict, last_epoch=-1):
-        # Attach dictionary with hyper-parameters
-        if not isinstance(hparams_dict, dict):
-            raise TypeError(f"{type(hparams_dict).__name__} is not an dictionary")
+    def __init__(
+        self,
+        hparams_dict: MutableMapping[str, Any],
+        last_epoch: int = -1,
+        apply_hparams: ApplyHParams | None = None,
+    ) -> None:
+        if not isinstance(hparams_dict, MutableMapping):
+            raise TypeError("hparams_dict must be a mutable mapping")
         self.hparams_dict = hparams_dict
+        self.apply_hparams = apply_hparams
 
         self.base_hparams = {hparam: value for hparam, value in hparams_dict.items()}
         self.last_epoch = last_epoch
         self._initial_step()
 
-    def _initial_step(self):
+    def _initial_step(self) -> None:
         """Initialize step counts and performs a step"""
         self._step_count = 0
         self.step()
 
-    def state_dict(self):
-        """Returns the state of the scheduler as a :class:`dict`.
+    def state_dict(self) -> dict[str, Any]:
+        """Return state without serializing model-owned objects or callbacks."""
+        return {
+            key: value
+            for key, value in self.__dict__.items()
+            if key not in {"hparams_dict", "apply_hparams"}
+        }
 
-        It contains an entry for every variable in self.__dict__
-        """
-        return {key: value for key, value in self.__dict__.items()}
+    def load_state_dict(self, state_dict: Mapping[str, Any]) -> None:
+        """Restore scheduler state while preserving the model-owned mapping."""
+        self.__dict__.update(
+            {
+                key: value
+                for key, value in state_dict.items()
+                if key not in {"hparams_dict", "apply_hparams"}
+            }
+        )
+        last_hparams = state_dict.get("_last_hparams")
+        if isinstance(last_hparams, Mapping):
+            self._apply(last_hparams)
 
-    def load_state_dict(self, state_dict):
-        """Loads the schedulers state.
-
-        Args:
-            state_dict (dict): scheduler state. Should be an object returned
-                from a call to :meth:`state_dict`.
-        """
-        self.__dict__.update(state_dict)
-
-    def get_last_hparams(self):
+    def get_last_hparams(self) -> dict[str, Any]:
         """Return last computed hyperparameter by current scheduler."""
         return self._last_hparams
 
-    def get_hparams(self):
+    def get_hparams(self) -> dict[str, Any]:
         # Compute learning rate using chainable form of the scheduler
         raise NotImplementedError
 
-    def step(self, epoch=None):
+    def _apply(self, hparams: Mapping[str, Any]) -> None:
+        self.hparams_dict.update(hparams)
+        self._last_hparams = dict(self.hparams_dict)
+        if self.apply_hparams is not None:
+            self.apply_hparams(self.hparams_dict)
+
+    def step(self, epoch: int | float | None = None) -> None:
         self._step_count += 1
         if epoch is None:
             self.last_epoch += 1
@@ -50,19 +69,18 @@ class HPScheduler:
         else:
             self.last_epoch = epoch
             hparams = getattr(self, "_get_closed_form_hparams", self.get_hparams)()
-        for hparam, value in hparams.items():
-            self.hparams_dict[hparam] = value
-        self._last_hparams = {key: value for key, value in self.hparams_dict.items()}
+        self._apply(hparams)
 
 
 class LinearHP(HPScheduler):
     def __init__(
         self,
-        hparams_dict: Mapping[str, Any],
+        hparams_dict: MutableMapping[str, Any],
         start_factor=1,
         end_factor=0.0,
         total_iters=5,
         last_epoch=-1,
+        apply_hparams: ApplyHParams | None = None,
     ):
         if start_factor > 1.0 or start_factor <= 0:
             raise ValueError(
@@ -75,7 +93,7 @@ class LinearHP(HPScheduler):
         self.start_factor = start_factor
         self.end_factor = end_factor
         self.total_iters = total_iters
-        super().__init__(hparams_dict, last_epoch)
+        super().__init__(hparams_dict, last_epoch, apply_hparams)
 
     def get_hparams(self):
 
@@ -114,10 +132,17 @@ class LinearHP(HPScheduler):
 
 
 class CosineAnnealingHP(HPScheduler):
-    def __init__(self, hparams_dict: Mapping[str, Any], T_max, eta_min=0, last_epoch=-1):
+    def __init__(
+        self,
+        hparams_dict: MutableMapping[str, Any],
+        T_max,
+        eta_min=0,
+        last_epoch=-1,
+        apply_hparams: ApplyHParams | None = None,
+    ):
         self.T_max = T_max
         self.eta_min = eta_min
-        super().__init__(hparams_dict, last_epoch)
+        super().__init__(hparams_dict, last_epoch, apply_hparams)
 
     def get_hparams(self):
         if self.last_epoch == 0:
@@ -157,7 +182,15 @@ class CosineAnnealingHP(HPScheduler):
 
 
 class CosineAnnealingWarmRestartsHP(HPScheduler):
-    def __init__(self, hparams_dict: Mapping[str, Any], T_0, T_mult=1, eta_min=0, last_epoch=-1):
+    def __init__(
+        self,
+        hparams_dict: MutableMapping[str, Any],
+        T_0,
+        T_mult=1,
+        eta_min=0,
+        last_epoch=-1,
+        apply_hparams: ApplyHParams | None = None,
+    ):
         if T_0 <= 0 or not isinstance(T_0, int):
             raise ValueError(f"Expected positive integer T_0, but got {T_0}")
         if T_mult < 1 or not isinstance(T_mult, int):
@@ -171,7 +204,7 @@ class CosineAnnealingWarmRestartsHP(HPScheduler):
         self.T_mult = T_mult
         self.eta_min = eta_min
         self.T_cur = last_epoch
-        super().__init__(hparams_dict, last_epoch)
+        super().__init__(hparams_dict, last_epoch, apply_hparams)
 
     def get_hparams(self):
         return {
@@ -230,7 +263,4 @@ class CosineAnnealingWarmRestartsHP(HPScheduler):
                 self.T_cur = epoch
         self.last_epoch = math.floor(epoch)
 
-        for hparam, value in self.get_hparams().items():
-            self.hparams_dict[hparam] = value
-
-        self._last_hparams = {key: value for key, value in self.hparams_dict.items()}
+        self._apply(self.get_hparams())

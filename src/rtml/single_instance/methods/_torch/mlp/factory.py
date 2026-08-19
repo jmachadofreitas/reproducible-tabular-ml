@@ -6,6 +6,7 @@ import torch
 from rtml.core.tasks import TaskSpec
 from rtml.methods.engines.bundles import TorchModelBundle
 from rtml.methods.engines.config import TorchFitConfig
+from rtml.methods.engines.optim import create_hp_scheduler
 from rtml.methods.engines.task_adapters import (
     create_loss_fn,
     create_torch_metrics,
@@ -35,7 +36,7 @@ def build_mlp_bundle(
     fit_config: TorchFitConfig,
     device: torch.device,
 ) -> TorchModelBundle:
-    """Build the dense single-head MLP method from one consumed config mapping."""
+    """Build the MLP method; its optional hyperparameter scheduler controls dropout."""
     config = dict(params)
     hidden_dims = _hidden_dims_from_config(config)
     dropout = float(config.pop("dropout", 0.0))
@@ -45,12 +46,29 @@ def build_mlp_bundle(
         raise ValueError(f"unknown simple_mlp params: {unknown}")
 
     output_dim = infer_output_dim(task.task_type, n_classes=n_classes)
+    if fit_config.hp_scheduler is not None and dropout <= 0.0:
+        raise ValueError("simple_mlp dropout scheduling requires model.params.dropout > 0")
     model = MLP(
         input_dim,
         [*hidden_dims, output_dim],
         dropout=dropout,
         last_dropout=False,
     ).to(device)
+    dropout_layers = tuple(
+        layer for layer in model.modules() if isinstance(layer, torch.nn.Dropout)
+    )
+
+    def apply_dropout(hparams: Mapping[str, Any]) -> None:
+        probability = float(hparams["dropout"])
+        for layer in dropout_layers:
+            layer.p = probability
+
+    hp_scheduler = create_hp_scheduler(
+        {"dropout": dropout},
+        config=None if fit_config.hp_scheduler is None else dict(fit_config.hp_scheduler),
+        max_epochs=fit_config.max_epochs,
+        apply_hparams=apply_dropout,
+    )
     loss_fn = create_loss_fn(task.task_type)
 
     return TorchModelBundle(
@@ -65,6 +83,7 @@ def build_mlp_bundle(
         ),
         evaluation_step=create_evaluation_step(task=task, model=model, loss_fn=loss_fn),
         prediction_step=create_prediction_step(task=task, model=model),
+        hp_scheduler=hp_scheduler,
         train_metrics_factory=lambda: create_torch_metrics(
             task.task_type, [metric.name for metric in task.metrics]
         ),

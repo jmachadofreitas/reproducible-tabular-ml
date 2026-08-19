@@ -1,4 +1,4 @@
-from typing import Callable, List, Optional
+from typing import Callable
 
 from torch import nn
 
@@ -17,14 +17,16 @@ class MLP(nn.Sequential):
     def __init__(
         self,
         in_features: int,
-        hidden_dims: List[int],
-        norm_layer: Optional[Callable[..., nn.Module]] = None,
-        activation_layer: Optional[Callable[..., nn.Module]] = nn.ReLU,
-        inplace: Optional[bool] = None,
+        hidden_dims: list[int],
+        norm_layer: Callable[..., nn.Module] | None = None,
+        activation_layer: Callable[..., nn.Module] | None = nn.ReLU,
+        inplace: bool | None = None,
         bias: bool = True,
         dropout: float = 0.0,
         last_dropout: bool = True,
     ):
+        if not 0.0 <= dropout <= 1.0:
+            raise ValueError(f"dropout must be between 0 and 1, got {dropout}")
         params = {} if inplace is None else {"inplace": inplace}
 
         layers = []

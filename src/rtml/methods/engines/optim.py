@@ -5,6 +5,7 @@ import torch
 from torch import nn
 
 from rtml.methods.engines.schedulers import (
+    ApplyHParams,
     CosineAnnealingHP,
     CosineAnnealingWarmRestartsHP,
     LinearHP,
@@ -62,6 +63,7 @@ def create_hp_scheduler(
     *,
     config: dict[str, Any] | None,
     max_epochs: int,
+    apply_hparams: ApplyHParams | None = None,
 ) -> Any | None:
     """Create an arbitrary-hyperparameter scheduler, or no scheduler."""
     if not config:
@@ -73,12 +75,16 @@ def create_hp_scheduler(
         return None
     if name == "linear":
         scheduler_config.setdefault("total_iters", max_epochs)
-        return LinearHP(hparams, **scheduler_config)
+        return LinearHP(hparams, apply_hparams=apply_hparams, **scheduler_config)
     if name == "cosine":
         scheduler_config.setdefault("T_max", max_epochs)
-        return CosineAnnealingHP(hparams, **scheduler_config)
+        return CosineAnnealingHP(hparams, apply_hparams=apply_hparams, **scheduler_config)
     if name == "cosine_warm_restarts":
-        return CosineAnnealingWarmRestartsHP(hparams, **scheduler_config)
+        return CosineAnnealingWarmRestartsHP(
+            hparams,
+            apply_hparams=apply_hparams,
+            **scheduler_config,
+        )
     raise ValueError(
         "unknown hyperparameter scheduler "
         f"{name!r}; expected one of: linear, cosine, cosine_warm_restarts"
