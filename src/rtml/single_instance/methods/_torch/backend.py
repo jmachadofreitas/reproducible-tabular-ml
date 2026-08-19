@@ -19,15 +19,18 @@ from rtml.core.tasks import MetricSpec, TaskSpec, TaskType
 from rtml.loggers import Logger
 from rtml.methods.backends.base import BackendRefitResult, BackendResult, MethodBackend
 from rtml.methods.engines.bundles import TorchModelBundle
-from rtml.methods.engines.checkpointing import (
-    CheckpointManager,
-    build_checkpoint_manager,
-    checkpoint_directory,
-)
+from rtml.methods.engines.checkpointing import build_checkpoint_manager
 from rtml.methods.engines.config import TorchFitConfig
-from rtml.methods.engines.core import Evaluator, Trainer, resolve_device, seed_torch
+from rtml.methods.engines.core import (
+    Evaluator,
+    Trainer,
+    as_float32_array,
+    resolve_device,
+    seed_torch,
+)
 from rtml.methods.engines.fitting import fit_model_bundle
 from rtml.methods.engines.task_adapters import (
+    build_supervised_prediction_set,
     infer_score_mode,
     resolve_score_metric,
     target_tensors,
@@ -35,11 +38,9 @@ from rtml.methods.engines.task_adapters import (
 from rtml.single_instance.methods._torch.data import (
     DataLoaderBundle,
     TensorDatasetBundle,
-    as_float32_array,
 )
 from rtml.single_instance.methods._torch.fitted import TorchFittedMethod
 from rtml.single_instance.methods._torch.mlp.factory import build_mlp_bundle
-from rtml.single_instance.methods._torch.outputs import build_prediction_set
 from rtml.single_instance.methods._torch.tabm.factory import build_tabm_bundle
 from rtml.single_instance.preprocessing import build_preprocessor
 
@@ -128,28 +129,30 @@ class TorchBackend(MethodBackend):
             bundle=bundle,
             generator=generator,
         )
-        score_metric: MetricSpec = resolve_score_metric(
+        score_metric = resolve_score_metric(
             case.task.primary_metric,
             case.task.metrics,
         )
-        score_mode = infer_score_mode(score_metric)
+        score_name = None if score_metric is None else score_metric.name
+        score_mode = "min" if score_metric is None else infer_score_mode(score_metric)
         trainer = fit_model_bundle(
             bundle,
             loaders.train,
             validation_dataloader=loaders.validation,
             test_dataloader=loaders.test,
-            score_name=score_metric.name,
+            score_name=score_name,
             score_mode=score_mode,
             device=device,
             deterministic=None if runtime is None else runtime.deterministic,
             logger=logger,
-            checkpoint_manager=self._build_checkpoint_manager(
-                case=case,
-                method=method,
-                resample=resample,
-                bundle=bundle,
-                score_mode=score_mode,
+            checkpoint_manager=build_checkpoint_manager(
+                bundle.fit_config.checkpoint,
+                case_name=case.name,
+                method_name=method.name,
+                resample_id=resample.id,
                 seed=seed,
+                default_score_mode=score_mode,
+                default_save_best=resample.valid_idx is not None and score_name is not None,
             ),
         )
         fit_time = perf_counter() - fit_start
@@ -234,12 +237,9 @@ class TorchBackend(MethodBackend):
             shuffle=True,
             generator=generator,
         )
-        score_metric: MetricSpec = resolve_score_metric(task.primary_metric, task.metrics)
         fit_model_bundle(
             bundle,
             train_loader,
-            score_name=score_metric.name,
-            score_mode=infer_score_mode(score_metric),
             device=device,
             deterministic=None if runtime is None else runtime.deterministic,
             logger=logger,
@@ -307,7 +307,6 @@ class TorchBackend(MethodBackend):
             target=task_data["target"],
             sample_weight=task_data.get("sample_weight"),
             groups=task_data.get("groups", []),
-            sensitive_attributes=task_data.get("sensitive_attributes", []),
             metrics=[MetricSpec(**metric) for metric in task_data.get("metrics", [])],
             primary_metric=task_data.get("primary_metric"),
             metadata=task_data.get("metadata", {}),
@@ -442,38 +441,6 @@ class TorchBackend(MethodBackend):
             ),
         )
 
-    def _build_checkpoint_manager(
-        self,
-        *,
-        case: BenchmarkCase,
-        method: MethodSpec,
-        resample: Resample,
-        bundle: TorchModelBundle,
-        score_mode: str,
-        seed: int,
-    ) -> CheckpointManager | None:
-        config = dict(bundle.fit_config.checkpoint)
-        config.setdefault("save_best", resample.valid_idx is not None)
-        checkpoint_root = config.pop("dir", None)
-        resume_from = config.get("resume_from")
-        if checkpoint_root is None:
-            if not config.get("enabled", bool(resume_from)):
-                return None
-            raise ValueError("checkpoint.dir is required when checkpointing is enabled")
-        config.setdefault("require_empty", resume_from in {None, "", False})
-        directory = checkpoint_directory(
-            checkpoint_root,
-            case_name=case.name,
-            method_name=method.name,
-            resample_id=resample.id,
-            seed=seed,
-        )
-        return build_checkpoint_manager(
-            config,
-            directory=directory,
-            default_score_mode=score_mode,
-        )
-
     def _evaluate(
         self,
         *,
@@ -487,7 +454,7 @@ class TorchBackend(MethodBackend):
     ) -> PredictionSet:
         evaluator = Evaluator(bundle.evaluation_step, device=device)
         outputs, _ = evaluator.evaluate(test_loader)
-        return build_prediction_set(
+        return build_supervised_prediction_set(
             case=case,
             method=method,
             resample_id=resample.id,

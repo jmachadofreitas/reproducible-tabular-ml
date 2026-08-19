@@ -6,7 +6,7 @@ import torch
 from torch.utils.data import DataLoader, TensorDataset
 
 from rtml.methods.engines.bundles import TorchModelBundle
-from rtml.single_instance.methods._torch.data import as_float32_array
+from rtml.methods.engines.core import as_float32_array
 
 
 class TorchFittedMethod:

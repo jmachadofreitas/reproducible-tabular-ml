@@ -1,16 +1,10 @@
 from collections.abc import Sequence
-from typing import Any, NamedTuple
+from typing import NamedTuple
 
 import numpy as np
 import torch
 from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import DataLoader, Dataset
-
-
-def as_float32_array(value: Any) -> np.ndarray:
-    if hasattr(value, "toarray"):
-        value = value.toarray()
-    return np.asarray(value, dtype=np.float32)
 
 
 class BagDatasetBundle(NamedTuple):

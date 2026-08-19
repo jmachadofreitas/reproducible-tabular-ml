@@ -1,13 +1,7 @@
-from typing import Any, NamedTuple
+from typing import NamedTuple
 
 import numpy as np
 from torch.utils.data import DataLoader, TensorDataset
-
-
-def as_float32_array(value: Any) -> np.ndarray:
-    if hasattr(value, "toarray"):
-        value = value.toarray()
-    return np.asarray(value, dtype=np.float32)
 
 
 class TensorDatasetBundle(NamedTuple):

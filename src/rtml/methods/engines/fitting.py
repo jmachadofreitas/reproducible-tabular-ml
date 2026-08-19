@@ -31,9 +31,9 @@ def fit_model_bundle(
     *,
     validation_dataloader: DataLoader | None = None,
     test_dataloader: DataLoader | None = None,
-    score_name: str,
-    score_mode: str,
     device: torch.device,
+    score_name: str | None = None,
+    score_mode: str = "min",
     deterministic: bool | None = None,
     logger: Logger | None = None,
     checkpoint_manager: CheckpointManager | None = None,
@@ -41,17 +41,21 @@ def fit_model_bundle(
     """Fit one model bundle with the common Torch/Ignite training machinery."""
     if bundle.fit_config.early_stopping_patience is not None and validation_dataloader is None:
         raise ValueError("early stopping requires validation data")
+    if bundle.fit_config.early_stopping_patience is not None and score_name is None:
+        raise ValueError("early stopping requires a task metric")
     if (
         checkpoint_manager is not None
         and checkpoint_manager.save_best
         and validation_dataloader is None
     ):
         raise ValueError("best checkpoint selection requires validation data")
+    if checkpoint_manager is not None and checkpoint_manager.save_best and score_name is None:
+        raise ValueError("best checkpoint selection requires a task metric")
 
     validation_evaluator = None
     if validation_dataloader is not None:
         validation_metrics = bundle.make_validation_metrics()
-        if score_name not in validation_metrics.metrics:
+        if score_name is not None and score_name not in validation_metrics.metrics:
             available = ", ".join(validation_metrics.metrics) or "none"
             raise ValueError(
                 f"torch validation objective {score_name!r} is not available; "

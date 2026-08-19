@@ -224,50 +224,45 @@ class CheckpointManager:
         return "{filename_prefix}_{global_step}.ckpt"
 
 
-def checkpoint_directory(
-    root: str | Path,
+def build_checkpoint_manager(
+    config: Mapping[str, Any] | None,
     *,
     case_name: str,
     method_name: str,
     resample_id: str,
     seed: int,
-) -> Path:
-    """Return the checkpoint directory for one planned run."""
-    return (
-        Path(root)
-        / _safe_path_part(case_name)
-        / _safe_path_part(method_name)
-        / _safe_path_part(resample_id)
-        / f"seed_{seed}"
-    )
-
-
-def build_checkpoint_manager(
-    config: Mapping[str, Any] | None,
-    *,
-    directory: str | Path,
     default_score_mode: str,
+    default_save_best: bool,
 ) -> CheckpointManager | None:
-    """Build an optional checkpoint manager from method fit configuration."""
+    """Build checkpoint handling and its run-specific artifact directory."""
     options = dict(config or {})
     enabled = bool(options.pop("enabled", bool(options.get("resume_from"))))
     if not enabled:
         return None
 
+    root = options.pop("dir", None)
+    if root is None:
+        raise ValueError("checkpoint.dir is required when checkpointing is enabled")
     score_mode = str(options.pop("score_mode", default_score_mode))
     save_last = bool(options.pop("save_last", True))
-    save_best = bool(options.pop("save_best", True))
+    save_best = bool(options.pop("save_best", default_save_best))
     every_n_epochs = int(options.pop("every_n_epochs", 1))
     delay_n_epochs = int(options.pop("delay_n_epochs", 0))
     n_saved = _optional_int(options.pop("n_saved", 1))
     atomic = bool(options.pop("atomic", True))
-    require_empty = bool(options.pop("require_empty", False))
     resume_from = options.pop("resume_from", None)
+    require_empty = bool(options.pop("require_empty", resume_from in {None, "", False}))
     if options:
         unknown = ", ".join(sorted(options))
         raise ValueError(f"unknown torch checkpoint config: {unknown}")
     return CheckpointManager(
-        directory=directory,
+        directory=(
+            Path(root)
+            / _safe_path_part(case_name)
+            / _safe_path_part(method_name)
+            / _safe_path_part(resample_id)
+            / f"seed_{seed}"
+        ),
         score_mode=score_mode,
         save_last=save_last,
         save_best=save_best,

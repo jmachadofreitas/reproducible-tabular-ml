@@ -124,6 +124,13 @@ def concat_evaluator_output(outputs: Mapping[str, list[Any]], name: str) -> np.n
     return np.concatenate(arrays, axis=0)
 
 
+def as_float32_array(value: Any) -> np.ndarray:
+    """Convert dense or scipy-style sparse inputs to a float32 array."""
+    if hasattr(value, "toarray"):
+        value = value.toarray()
+    return np.asarray(value, dtype=np.float32)
+
+
 class Trainer(Engine):
     """Ignite trainer with optional validation, testing, and early stopping."""
 

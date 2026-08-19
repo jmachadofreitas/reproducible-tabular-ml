@@ -1,4 +1,4 @@
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 import numpy as np
@@ -17,7 +17,10 @@ from sklearn.metrics import roc_auc_score
 from torch import nn
 
 from rtml.core.benchmarks import BenchmarkCase
+from rtml.core.methods import MethodSpec
+from rtml.core.results import PredictionSet
 from rtml.core.tasks import MetricSpec, TaskType
+from rtml.methods.engines.core import concat_evaluator_output
 from rtml.methods.engines.metrics import IgniteMetric, RunningMetrics
 
 PreparedTarget = Callable[[torch.Tensor], torch.Tensor]
@@ -198,8 +201,6 @@ def create_torch_metrics(
 ) -> RunningMetrics:
     requested = set(metric_names)
     if task_type == TaskType.REGRESSION:
-        if not requested:
-            requested.add("mse")
         metrics = {"loss": IgniteMetric(Average())}
         available = {
             "mse": MeanSquaredError,
@@ -215,7 +216,7 @@ def create_torch_metrics(
         TaskType.MULTICLASS_CLASSIFICATION,
     }:
         metrics = {"loss": IgniteMetric(Average())}
-        if not requested or "accuracy" in requested:
+        if "accuracy" in requested:
             metrics["accuracy"] = IgniteMetric(Accuracy())
         if "roc_auc" in requested:
             roc_auc = (
@@ -233,10 +234,10 @@ def create_torch_metrics(
 def resolve_score_metric(
     primary_metric: str | None,
     metrics: Sequence[MetricSpec],
-) -> MetricSpec:
-    """Return the metric used for checkpoint selection and early stopping."""
+) -> MetricSpec | None:
+    """Return the requested model-selection metric, if the task defines one."""
     if not metrics:
-        raise ValueError("task must define at least one metric to build a trainer")
+        return None
     if primary_metric is None:
         return metrics[0]
     for metric in metrics:
@@ -248,3 +249,48 @@ def resolve_score_metric(
 def infer_score_mode(metric: MetricSpec) -> str:
     """Return the checkpoint optimization mode for a task metric."""
     return "max" if metric.greater_is_better else "min"
+
+
+def build_supervised_prediction_set(
+    *,
+    case: BenchmarkCase,
+    method: MethodSpec,
+    resample_id: str,
+    test_indices: np.ndarray,
+    outputs: Mapping[str, list[Any]],
+    classes: np.ndarray | None,
+) -> PredictionSet:
+    """Build sample-aligned predictions from collected Torch evaluator outputs."""
+    y_true = require_supervised_target(case).iloc[test_indices].to_numpy()
+    if case.task.task_type == TaskType.REGRESSION:
+        return PredictionSet(
+            dataset_name=case.dataset.name,
+            task_name=case.task.name,
+            method_name=method.name,
+            resample_id=resample_id,
+            sample_ids=case.dataset.sample_ids_for(test_indices),
+            y_true=y_true,
+            values=concat_evaluator_output(outputs, "y_pred").reshape(-1),
+            metadata={"case_name": case.name},
+        )
+
+    if classes is None:
+        raise ValueError("classification predictions require class labels")
+    predicted_indices = concat_evaluator_output(outputs, "labels").reshape(-1).astype(int)
+    probabilities = concat_evaluator_output(outputs, "probabilities")
+    if case.task.task_type == TaskType.BINARY_CLASSIFICATION:
+        positive_probability = probabilities.reshape(-1)
+        probabilities = np.column_stack([1.0 - positive_probability, positive_probability])
+
+    return PredictionSet(
+        dataset_name=case.dataset.name,
+        task_name=case.task.name,
+        method_name=method.name,
+        resample_id=resample_id,
+        sample_ids=case.dataset.sample_ids_for(test_indices),
+        y_true=y_true,
+        labels=classes[predicted_indices],
+        probabilities=probabilities,
+        scores=concat_evaluator_output(outputs, "logits"),
+        metadata={"case_name": case.name, "classes": classes.tolist()},
+    )
