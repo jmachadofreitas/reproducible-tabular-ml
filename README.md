@@ -6,7 +6,7 @@ RTML is a proof-of-concept for reproducible benchmarking of complete tabular ML 
 
 ## Requirements
 
-* Python 3.11+
+* Python 3.14+
 * `uv`
 
 ## Setup
@@ -17,25 +17,45 @@ uv sync --dev
 
 ## Run
 
+Run the complete local workflow from benchmark comparison through refit and inference:
+
+```bash
+uv run python examples/single_instance/benchmark_to_refit.py
+```
+
+The example writes per-run and aggregate reports, readable run evidence, and the selected fitted method under `outputs/`.
+
 Run the default sklearn classification smoke study:
 
 ```bash
-uv run python experiments/single_instance/smoke-test/run.py
+uv run python -m experiments.single_instance.smoke-test
 ```
 
 Use the sequential or the parallel executor (`ray`) to run the smoke study:
 
 ```bash
-uv run python experiments/single_instance/smoke-test/run.py execution.executor=sequential # or `ray`
+uv run python -m experiments.single_instance.smoke-test execution.executor=sequential # or `ray`
 ```
 
 Override the benchmark suite from the CLI:
 
 ```bash
-uv run python experiments/single_instance/smoke-test/run.py benchmark.suite=regression
+uv run python -m experiments.single_instance.smoke-test benchmark.suite=regression
 ```
 
-Outputs are written under Hydra's `outputs/` directory. Each run stores prediction artifacts plus `summary.csv`, `summary.json`, `aggregate.csv`, and `aggregate.json`.
+Outputs are written under Hydra's `outputs/` directory. Benchmark cases store their source, schema, task, and exact splits in `case.json`; each run stores `run.json` and predictions alongside the summary tables.
+
+Run the simple Torch MLP example:
+
+```bash
+uv run python -m experiments.single_instance.simple-mlp
+```
+
+Run the classic multi-instance comparison:
+
+```bash
+uv run python -m experiments.multi_instance.classic_mil
+```
 
 ## Tracking
 

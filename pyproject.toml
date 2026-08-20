@@ -5,6 +5,8 @@ description = "Reproducible benchmarking for tabular ML methods"
 requires-python = ">=3.14"
 license = { file = "LICENSE" }
 dependencies = [
+    "joblib",
+    "numpy",
     "pandas",
     "tabulate",
     "torch",

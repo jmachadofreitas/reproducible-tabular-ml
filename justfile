@@ -2,7 +2,7 @@ setup:
     uv sync --dev
 
 test path="tests" *args:
-    uv run pytest {{path}} {{args}}
+    uv run python -m pytest {{path}} {{args}}
 
 lint:
     uv run ruff check .
