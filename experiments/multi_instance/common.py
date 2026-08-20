@@ -22,7 +22,6 @@ from rtml.multi_instance.datasets.popstats import load_popstats_suite
 from rtml.multi_instance.methods import default_multi_instance_backends
 from rtml.multi_instance.tasks import MultiInstanceTask
 from rtml.results.reports import save_aggregate_summary, save_run_summary
-from rtml.results.subgroups import save_subgroup_summary
 from rtml.runs import run_study
 
 PARADIGM = "multi_instance"
@@ -64,10 +63,6 @@ def run_config(config: Mapping[str, Any], *, experiment_name: str) -> list[RunRe
     logger_config = config.get("logger", {})
     logger = build_logger(logger_config)
     execution = dict(config.get("execution") or {})
-    subgroup_report = dict(config.get("subgroup_report") or {})
-    subgroup_enabled = bool(subgroup_report.get("enabled", False))
-    if subgroup_enabled and not execution.get("artifact_dir"):
-        raise ValueError("subgroup_report requires execution.artifact_dir")
     results = run_study(
         study=study,
         backends=default_multi_instance_backends(),
@@ -101,23 +96,6 @@ def run_config(config: Mapping[str, Any], *, experiment_name: str) -> list[RunRe
         execution.get("aggregate_json"),
         execution.get("aggregate_markdown"),
     )
-    if subgroup_enabled:
-        save_subgroup_summary(
-            rows,
-            cases={case.name: case for case in suite.cases},
-            columns=list(subgroup_report.get("columns") or []),
-            csv_path=subgroup_report.get("csv"),
-            json_path=subgroup_report.get("json"),
-            markdown_path=subgroup_report.get("markdown"),
-            min_count=int(subgroup_report.get("min_count", 1)),
-        )
-        report_paths.extend(
-            _existing_paths(
-                subgroup_report.get("csv"),
-                subgroup_report.get("json"),
-                subgroup_report.get("markdown"),
-            )
-        )
     _log_report_artifacts(
         logger,
         experiment_name=experiment_name,

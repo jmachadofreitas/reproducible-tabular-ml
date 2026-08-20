@@ -7,6 +7,7 @@ study:
 benchmark:
   source: sklearn
   suite: classification
+  valid_size: 0.2
 
 methods:
   - name: mlp
@@ -21,13 +22,11 @@ methods:
     fit:
       batch_size: 32
       max_epochs: 5
-      validation_fraction: 0.2
       optimizer:
         name: adam
         lr: 0.001
       tracking:
         log_test_metrics: true
-        store_history: true
       checkpoint:
         enabled: true
         dir: ${hydra:runtime.output_dir}/checkpoints
@@ -51,13 +50,11 @@ methods:
     fit:
       batch_size: 32
       max_epochs: 5
-      validation_fraction: 0.2
       optimizer:
         name: adam
         lr: 0.001
       tracking:
         log_test_metrics: true
-        store_history: true
       checkpoint:
         enabled: true
         dir: ${hydra:runtime.output_dir}/checkpoints
@@ -73,21 +70,13 @@ seeds:
 execution:
   executor: sequential
   show_progress: true
-  prediction_dir: ${hydra:runtime.output_dir}/predictions
+  artifact_dir: ${hydra:runtime.output_dir}/artifacts
   summary_csv: ${hydra:runtime.output_dir}/summary.csv
   summary_json: ${hydra:runtime.output_dir}/summary.json
   summary_markdown: ${hydra:runtime.output_dir}/summary.md
   aggregate_csv: ${hydra:runtime.output_dir}/aggregate.csv
   aggregate_json: ${hydra:runtime.output_dir}/aggregate.json
   aggregate_markdown: ${hydra:runtime.output_dir}/aggregate.md
-
-subgroup_report:
-  enabled: false
-  columns: []
-  min_count: 1
-  csv: ${hydra:runtime.output_dir}/subgroups.csv
-  json: ${hydra:runtime.output_dir}/subgroups.json
-  markdown: ${hydra:runtime.output_dir}/subgroups.md
 
 logger:
   backend: mlflow

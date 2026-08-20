@@ -12,7 +12,6 @@ from rtml.builders import (
 from rtml.core.runs import RunResult
 from rtml.loggers import build_logger
 from rtml.results.reports import save_aggregate_summary, save_run_summary
-from rtml.results.subgroups import save_subgroup_summary
 from rtml.runs import run_study
 from rtml.single_instance.benchmarks.builders import build_benchmark_suite
 from rtml.single_instance.methods import default_single_instance_backends
@@ -35,10 +34,6 @@ def run_config(config: Mapping[str, Any], *, experiment_name: str) -> list[RunRe
     logger = build_logger(logger_config)
     executor = build_executor(config.get("execution", {}), logger_config=logger_config)
     execution = dict(config.get("execution") or {})
-    subgroup_report = dict(config.get("subgroup_report") or {})
-    subgroup_enabled = bool(subgroup_report.get("enabled", False))
-    if subgroup_enabled and not execution.get("prediction_dir"):
-        raise ValueError("subgroup_report requires execution.prediction_dir")
 
     results = run_study(
         study=study,
@@ -47,12 +42,11 @@ def run_config(config: Mapping[str, Any], *, experiment_name: str) -> list[RunRe
         executor=executor,
         runtime_specs=runtime_specs,
         scheduler_resources=scheduler_resources,
-        prediction_dir=execution.get("prediction_dir"),
+        artifact_dir=execution.get("artifact_dir"),
         logger=logger,
         metadata={"experiment": experiment_name, "paradigm": PARADIGM},
         continue_on_error=bool(execution.get("continue_on_error", False)),
         show_progress=bool(execution.get("show_progress", True)),
-        subgroup_columns=list(subgroup_report.get("columns") or []) if subgroup_enabled else None,
     )
     report_paths = []
     rows = save_run_summary(
@@ -81,22 +75,6 @@ def run_config(config: Mapping[str, Any], *, experiment_name: str) -> list[RunRe
             execution.get("aggregate_markdown"),
         )
     )
-    if subgroup_enabled:
-        save_subgroup_summary(
-            rows,
-            metrics_by_task={case.task.name: case.task.metrics for case in suite.cases},
-            csv_path=subgroup_report.get("csv"),
-            json_path=subgroup_report.get("json"),
-            markdown_path=subgroup_report.get("markdown"),
-            min_count=int(subgroup_report.get("min_count", 1)),
-        )
-        report_paths.extend(
-            _existing_paths(
-                subgroup_report.get("csv"),
-                subgroup_report.get("json"),
-                subgroup_report.get("markdown"),
-            )
-        )
     _log_report_artifacts(logger, experiment_name=experiment_name, paths=report_paths)
     return results
 

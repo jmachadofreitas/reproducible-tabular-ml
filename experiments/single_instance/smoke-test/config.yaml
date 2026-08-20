@@ -57,7 +57,7 @@ seeds:
 execution:
   executor: sequential
   show_progress: true
-  prediction_dir: ${hydra:runtime.output_dir}/predictions
+  artifact_dir: ${hydra:runtime.output_dir}/artifacts
   summary_csv: ${hydra:runtime.output_dir}/summary.csv
   summary_json: ${hydra:runtime.output_dir}/summary.json
   summary_markdown: ${hydra:runtime.output_dir}/summary.md
@@ -69,14 +69,6 @@ execution:
     init: true
     propagate_uv_runtime_env: false
     init_kwargs: {}
-
-subgroup_report:
-  enabled: false
-  columns: []
-  min_count: 1
-  csv: ${hydra:runtime.output_dir}/subgroups.csv
-  json: ${hydra:runtime.output_dir}/subgroups.json
-  markdown: ${hydra:runtime.output_dir}/subgroups.md
 
 logger:
   backend: mlflow
