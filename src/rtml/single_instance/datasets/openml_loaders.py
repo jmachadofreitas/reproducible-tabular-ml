@@ -3,7 +3,6 @@
 from pathlib import Path
 from typing import cast
 
-import numpy as np
 import openml
 import pandas as pd
 
@@ -232,20 +231,6 @@ def get_openml_suite_task_ids(suite_id: int = OPENML_CC18_SUITE_ID) -> list[int]
     return [int(task_id) for task_id in suite.tasks]
 
 
-def get_openml_task_split_indices(
-    task_id: int,
-    *,
-    repeat: int = 0,
-    fold: int = 0,
-    sample: int = 0,
-) -> tuple[np.ndarray, np.ndarray]:
-    task = cast(
-        openml.tasks.OpenMLSupervisedTask,
-        openml.tasks.get_task(task_id, download_splits=True),
-    )
-    return task.get_train_test_split_indices(repeat=repeat, fold=fold, sample=sample)
-
-
 def load_openml_benchmark_case(
     task_id: int,
     *,
@@ -330,11 +315,6 @@ def load_openml_benchmark_case(
     return benchmark_case
 
 
-def load_openml_task(task_id: int) -> tuple[Dataset, TaskSpec]:
-    benchmark_case = load_openml_benchmark_case(task_id)
-    return benchmark_case.dataset, benchmark_case.task
-
-
 def load_openml_suite(suite_id: int = OPENML_CC18_SUITE_ID) -> BenchmarkSuite:
     suite = get_openml_suite(suite_id)
     task_ids = get_openml_suite_task_ids(suite_id)
@@ -351,13 +331,3 @@ def load_openml_suite(suite_id: int = OPENML_CC18_SUITE_ID) -> BenchmarkSuite:
             "task_ids": task_ids,
         },
     )
-
-
-def load_openml_cc18_task(task_id: int) -> tuple[Dataset, TaskSpec]:
-    suite_task_ids = get_openml_suite_task_ids(OPENML_CC18_SUITE_ID)
-    if task_id not in suite_task_ids:
-        raise ValueError(
-            f"task_id {task_id} is not part of the OpenML-CC18 suite {OPENML_CC18_SUITE_ID}"
-        )
-    benchmark_case = load_openml_benchmark_case(task_id, suite_id=OPENML_CC18_SUITE_ID)
-    return benchmark_case.dataset, benchmark_case.task

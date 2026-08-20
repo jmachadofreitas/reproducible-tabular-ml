@@ -17,7 +17,6 @@ class MultiInstanceTask:
     target: str | None = None
     bag_source: list[str] = field(default_factory=list)
     groups: list[str] = field(default_factory=list)
-    sensitive_attributes: list[str] = field(default_factory=list)
     metrics: list[MetricSpec] = field(default_factory=list)
     primary_metric: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -30,7 +29,6 @@ class MultiInstanceTask:
         self.instance_source = list(self.instance_source)
         self.bag_source = list(self.bag_source)
         self.groups = list(self.groups)
-        self.sensitive_attributes = list(self.sensitive_attributes)
         self.metrics = list(self.metrics)
         self.metadata = dict(self.metadata or {})
 
@@ -49,11 +47,7 @@ class MultiInstanceTask:
                 f"primary_metric {self.primary_metric!r} is not present in metrics {metric_names}"
             )
 
-        reserved = [
-            column
-            for column in (self.target, *self.groups, *self.sensitive_attributes)
-            if column is not None
-        ]
+        reserved = [column for column in (self.target, *self.groups) if column is not None]
         overlapping_bag_inputs = sorted(set(self.bag_source).intersection(reserved))
         if overlapping_bag_inputs:
             raise ValueError(
@@ -66,7 +60,6 @@ class MultiInstanceTask:
         columns: list[str] = [
             *self.bag_source,
             *self.groups,
-            *self.sensitive_attributes,
         ]
         if self.target is not None:
             columns.append(self.target)

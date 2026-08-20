@@ -123,6 +123,15 @@ def test_dataset_rejects_non_string_column_names() -> None:
         Dataset(name="bad", data=data, schema=FeatureSchema.infer(data))
 
 
+def test_dataset_columns_does_not_expose_internal_state() -> None:
+    dataset = make_dataset()
+
+    columns = dataset.columns
+    columns.clear()
+
+    assert dataset.columns == set(dataset.data.columns)
+
+
 @pytest.mark.parametrize("positions", [[1.5], [True, False], np.array([[0, 1]])])
 def test_dataset_rejects_non_integer_or_non_vector_positions(positions) -> None:
     dataset = make_tagged_dataset()
