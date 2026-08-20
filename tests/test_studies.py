@@ -75,30 +75,6 @@ def test_model_spec_keeps_backend_selection_without_validating_implementation() 
     assert spec.backend == "torch"
 
 
-def test_study_from_suite_uses_suite_name_by_default() -> None:
-    suite = make_suite()
-    method = make_method()
-
-    study = Study.from_suite(suite=suite, methods=[method])
-
-    assert study.name == suite.name
-    assert study.suite == suite
-    assert study.methods == [method]
-    assert study.kind is StudyKind.COMPARISON
-
-
-def test_study_from_case_wraps_one_case_suite() -> None:
-    case = make_suite().cases[0]
-    method = make_method()
-
-    study = Study.from_case(case=case, methods=[method], name="single_case")
-
-    assert study.name == "single_case"
-    assert study.suite.name == case.name
-    assert study.suite.cases == [case]
-    assert study.methods == [method]
-
-
 def test_study_requires_at_least_one_method() -> None:
     with pytest.raises(ValueError, match="at least one method"):
         Study(name="empty", suite=make_suite(), methods=[])

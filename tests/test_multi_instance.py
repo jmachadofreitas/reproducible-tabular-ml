@@ -4,6 +4,7 @@ import pytest
 
 from rtml.core.benchmarks import BenchmarkCase, BenchmarkSuite
 from rtml.core.datasets import FeatureInfo, FeatureKind, FeatureSchema
+from rtml.core.methods import MethodSpec, ModelSpec
 from rtml.core.resampling import ResamplingSpec, ResamplingStrategy
 from rtml.core.tasks import MetricSpec, TaskType
 from rtml.multi_instance import MultiInstanceDataset, MultiInstanceTask
@@ -15,6 +16,7 @@ from rtml.multi_instance.datasets.popstats import (
     load_popstats_dataset,
     load_popstats_suite,
 )
+from rtml.multi_instance.methods._sklearn import MultiInstanceSklearnBackend
 from rtml.multi_instance.resampling import build_multi_instance_resampling_plan
 
 
@@ -100,9 +102,16 @@ def test_multi_instance_dataset_uses_offsets_for_bag_storage() -> None:
     assert dataset.sample_ids_for([2, 0]).tolist() == [30, 10]
 
 
-def test_multi_instance_dataset_supports_bag_subgroups() -> None:
-    dataset = make_grouped_mil_dataset()
+def test_multi_instance_column_properties_do_not_expose_internal_state() -> None:
+    dataset = make_mil_dataset()
 
+    bag_columns = dataset.bag_columns
+    instance_columns = dataset.instance_columns
+    bag_columns.clear()
+    instance_columns.clear()
+
+    assert dataset.bag_columns == set(dataset.bag_table.columns)
+    assert dataset.instance_columns == set(dataset.instance_table.columns)
 
 
 def test_multi_instance_dataset_rejects_bad_offsets() -> None:
@@ -217,6 +226,44 @@ def test_multi_instance_task_validates_bag_target_and_instance_inputs() -> None:
     )
     with pytest.raises(ValueError, match="instance columns"):
         bad_task.validate_columns(dataset)
+
+
+def test_mi_svm_rejects_metrics_that_require_probabilities_before_fitting() -> None:
+    dataset = make_grouped_mil_dataset()
+    dataset.bag_table["target"] = [0, 0, 0, 0, 1, 1, 1, 1]
+    task = MultiInstanceTask(
+        name="binary_mil",
+        task_type=TaskType.BINARY_CLASSIFICATION,
+        instance_source=["x"],
+        target="target",
+        metrics=[MetricSpec(name="log_loss", greater_is_better=False)],
+        primary_metric="log_loss",
+    )
+    resampling = build_multi_instance_resampling_plan(
+        dataset=dataset,
+        task=task,
+        spec=ResamplingSpec(
+            name="holdout",
+            strategy=ResamplingStrategy.HOLDOUT,
+            test_size=0.25,
+            shuffle=True,
+            seed=3,
+        ),
+    )
+    case = BenchmarkCase(
+        name="binary_mil",
+        dataset=dataset,
+        task=task,
+        resampling=resampling,
+    )
+    method = MethodSpec(
+        name="mi_svm",
+        transform={"policy": "linear_default"},
+        model=ModelSpec(kind="binary_mi_svm", backend="sklearn"),
+    )
+
+    with pytest.raises(ValueError, match="supports accuracy and roc_auc metrics only"):
+        MultiInstanceSklearnBackend().run(case=case, method=method)
 
 
 def test_multi_instance_resampling_indices_are_bag_positions() -> None:

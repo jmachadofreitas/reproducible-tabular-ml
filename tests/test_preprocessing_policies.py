@@ -1,9 +1,10 @@
 import pandas as pd
 import pytest
+from sklearn.compose import ColumnTransformer
 
 from rtml.core.datasets import Dataset, FeatureInfo, FeatureKind, FeatureSchema, FeatureTag
 from rtml.core.tasks import MetricSpec, TaskSpec, TaskType
-from rtml.single_instance.preprocessing import build_preprocessor
+from rtml.single_instance.preprocessing import PREPROCESSING_POLICIES, build_preprocessor
 
 
 def make_mixed_dataset() -> tuple[Dataset, TaskSpec]:
@@ -183,3 +184,35 @@ def test_unknown_preprocessing_policy_reports_known_names() -> None:
 
     with pytest.raises(KeyError, match="linear_default"):
         build_preprocessor(dataset=dataset, task=task, policy="does_not_exist")
+
+
+def test_preprocessing_policy_rejects_unknown_options() -> None:
+    dataset, task = make_mixed_dataset()
+
+    with pytest.raises(ValueError, match="numeric_imputer"):
+        build_preprocessor(
+            dataset=dataset,
+            task=task,
+            policy="linear_default",
+            options={"numeric_imputer": "median"},
+        )
+
+
+def test_registered_policy_owns_its_options(monkeypatch) -> None:
+    dataset, task = make_mixed_dataset()
+    received_options = {}
+
+    def build_custom_policy(dataset, task, options):
+        received_options.update(options)
+        return ColumnTransformer([], remainder="passthrough")
+
+    monkeypatch.setitem(PREPROCESSING_POLICIES, "custom", build_custom_policy)
+
+    build_preprocessor(
+        dataset=dataset,
+        task=task,
+        policy="custom",
+        options={"custom_option": 3},
+    )
+
+    assert received_options == {"custom_option": 3}

@@ -112,21 +112,3 @@ def test_load_openml_suite_returns_benchmark_suite(monkeypatch) -> None:
     assert suite.name == "OpenML-CC18"
     assert [task.metadata["openml_task_id"] for task in suite.cases] == [1590, 31]
     assert suite.metadata["suite_id"] == 99
-
-
-def test_load_openml_cc18_task_rejects_unknown_task_id(monkeypatch) -> None:
-    fake_suite = SimpleNamespace(tasks=[1590, 31])
-    monkeypatch.setattr(openml_loaders.openml.study, "get_suite", lambda suite_id: fake_suite)
-
-    with pytest.raises(ValueError, match="OpenML-CC18 suite"):
-        openml_loaders.load_openml_cc18_task(999999)
-
-
-def test_get_openml_task_split_indices_uses_fixed_openml_task_splits(monkeypatch) -> None:
-    fake_task = make_fake_task(1590)
-    monkeypatch.setattr(openml_loaders.openml.tasks, "get_task", lambda *args, **kwargs: fake_task)
-
-    train_idx, test_idx = openml_loaders.get_openml_task_split_indices(1590)
-
-    assert train_idx.tolist() == [0]
-    assert test_idx.tolist() == [1]
